@@ -1,0 +1,44 @@
+# All hooks run from the project's own environment (versions pinned in uv.lock).
+# Nothing is cloned from the network, so hook installs are instant and reproducible.
+repos:
+  - repo: local
+    hooks:
+      - id: trailing-whitespace
+        name: trim trailing whitespace
+        entry: uv run trailing-whitespace-fixer
+        language: system
+        types: [text]
+      - id: end-of-file-fixer
+        name: fix end of files
+        entry: uv run end-of-file-fixer
+        language: system
+        types: [text]
+      - id: check-yaml
+        name: check yaml
+        entry: uv run check-yaml
+        language: system
+        types: [yaml]
+      - id: check-added-large-files
+        name: check for added large files
+        entry: uv run check-added-large-files
+        language: system
+      - id: detect-private-key
+        name: detect private key
+        entry: uv run detect-private-key
+        language: system
+        types: [text]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+      - id: gitleaks
+        name: detect hardcoded secrets
+        entry: gitleaks git --pre-commit --redact --staged --verbose
+        language: system
+        pass_filenames: false
