@@ -6,6 +6,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Identity,
     Integer,
@@ -133,5 +134,56 @@ class TrialPublicationLink(Base):
     pmid: Mapped[str] = mapped_column(String(16), primary_key=True, index=True)
     link_source: Mapped[str] = mapped_column(String(32), primary_key=True)
     discovered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class FaersDrug(Base):
+    """A normalised drug term and how (or whether) it resolved in FAERS."""
+
+    __tablename__ = "faers_drugs"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    query_term: Mapped[str] = mapped_column(Text, unique=True)
+    match_field: Mapped[str | None] = mapped_column(String(32))  # None = unresolved
+    total_reports: Mapped[int] = mapped_column(BigInteger, default=0)
+    resolved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class TrialDrugLink(Base):
+    __tablename__ = "trial_drug_links"
+
+    nct_id: Mapped[str] = mapped_column(
+        ForeignKey("trials.nct_id", ondelete="CASCADE"), primary_key=True
+    )
+    drug_id: Mapped[int] = mapped_column(
+        ForeignKey("faers_drugs.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    intervention_name: Mapped[str] = mapped_column(Text)
+
+
+class FaersDrugEventStat(Base):
+    """Disproportionality for one drug-event pair at one FAERS data snapshot."""
+
+    __tablename__ = "faers_drug_event_stats"
+
+    drug_id: Mapped[int] = mapped_column(
+        ForeignKey("faers_drugs.id", ondelete="CASCADE"), primary_key=True
+    )
+    reaction_pt: Mapped[str] = mapped_column(Text, primary_key=True)
+    snapshot_date: Mapped[date] = mapped_column(primary_key=True)
+    a: Mapped[int] = mapped_column(BigInteger)
+    n_drug: Mapped[int] = mapped_column(BigInteger)
+    n_event: Mapped[int] = mapped_column(BigInteger)
+    n_total: Mapped[int] = mapped_column(BigInteger)
+    prr: Mapped[float | None] = mapped_column(Float)
+    ror: Mapped[float | None] = mapped_column(Float)
+    ror_ci_low: Mapped[float | None] = mapped_column(Float)
+    ror_ci_high: Mapped[float | None] = mapped_column(Float)
+    chi2: Mapped[float | None] = mapped_column(Float)
+    is_signal: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
