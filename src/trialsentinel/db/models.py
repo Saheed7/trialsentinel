@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -95,5 +96,42 @@ class IngestionRun(Base):
     updated: Mapped[int] = mapped_column(Integer, default=0)
     unchanged: Mapped[int] = mapped_column(Integer, default=0)
     invalid: Mapped[int] = mapped_column(Integer, default=0)
+    stats: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     raw_uri: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class Publication(Base):
+    __tablename__ = "publications"
+
+    pmid: Mapped[str] = mapped_column(String(16), primary_key=True)
+    title: Mapped[str] = mapped_column(Text)
+    abstract: Mapped[str | None] = mapped_column(Text)
+    journal: Mapped[str | None] = mapped_column(Text)
+    pub_date: Mapped[date | None]
+    pub_date_precision: Mapped[str | None] = mapped_column(String(8))
+    doi: Mapped[str | None] = mapped_column(Text)
+    publication_types: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    registry_ids: Mapped[list[str]] = mapped_column(ARRAY(String(16)), default=list)
+    raw_hash: Mapped[str] = mapped_column(String(64))
+    first_ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class TrialPublicationLink(Base):
+    """One row per (trial, paper, evidence type): the same pair can be linked several ways."""
+
+    __tablename__ = "trial_publication_links"
+
+    nct_id: Mapped[str] = mapped_column(
+        ForeignKey("trials.nct_id", ondelete="CASCADE"), primary_key=True
+    )
+    pmid: Mapped[str] = mapped_column(String(16), primary_key=True, index=True)
+    link_source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    discovered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

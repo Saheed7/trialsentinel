@@ -51,7 +51,7 @@ def _is_retryable(exc: BaseException) -> bool:
 
 def _log_retry(state: RetryCallState) -> None:
     exc = state.outcome.exception() if state.outcome else None
-    log.warning("http_retry", attempt=state.attempt_number, error=repr(exc))
+    log.warning("http_retry", attempt=state.attempt_number, error=type(exc).__name__)
 
 
 class SourceHTTPClient:
@@ -65,13 +65,15 @@ class SourceHTTPClient:
         timeout_s: float,
         max_retries: int,
         user_agent: str,
+        default_params: dict[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         retry_wait: wait_base | None = None,
     ) -> None:
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout_s,
-            headers={"User-Agent": user_agent, "Accept": "application/json"},
+            headers={"User-Agent": user_agent},
+            params=default_params,
             transport=transport,
             follow_redirects=True,
         )
@@ -79,7 +81,7 @@ class SourceHTTPClient:
         self._max_retries = max_retries
         self._retry_wait = retry_wait or wait_exponential_jitter(initial=1, max=30)
 
-    async def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def _get(self, path: str, params: dict[str, Any] | None) -> httpx.Response:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(self._max_retries),
             wait=self._retry_wait,
@@ -91,8 +93,14 @@ class SourceHTTPClient:
                 await self._limiter.acquire()
                 response = await self._client.get(path, params=params)
                 response.raise_for_status()
-                return response.json()
+                return response
         raise RuntimeError("unreachable: retry loop exited without a result")
+
+    async def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        return (await self._get(path, params)).json()
+
+    async def get_text(self, path: str, params: dict[str, Any] | None = None) -> str:
+        return (await self._get(path, params)).text
 
     async def aclose(self) -> None:
         await self._client.aclose()

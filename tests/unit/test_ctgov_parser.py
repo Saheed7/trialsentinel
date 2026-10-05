@@ -67,3 +67,21 @@ def test_hash_changes_when_content_changes() -> None:
 def test_missing_nct_id_is_rejected() -> None:
     with pytest.raises(ValueError, match="nctId"):
         parse_study({"protocolSection": {"identificationModule": {}}})
+
+
+def test_registry_references_keep_only_valid_unique_pmids() -> None:
+    study = copy.deepcopy(STUDY)
+    study["protocolSection"]["referencesModule"] = {
+        "references": [
+            {"pmid": "31000001", "type": "RESULT", "citation": "Smith et al."},
+            {"pmid": "31000001", "type": "RESULT"},
+            {"pmid": "n/a", "type": "BACKGROUND"},
+            {"type": "BACKGROUND", "citation": "no pmid"},
+        ]
+    }
+    refs = parse_study(study).references
+    assert [(r.pmid, r.type) for r in refs] == [("31000001", "RESULT")]
+
+
+def test_hash_includes_parser_version() -> None:
+    assert parse_study(STUDY).raw_hash != stable_hash(STUDY)

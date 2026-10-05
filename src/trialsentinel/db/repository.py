@@ -1,5 +1,6 @@
 """Idempotent persistence: unchanged records are skipped via content hash."""
 
+from collections.abc import Sequence
 from enum import StrEnum
 from typing import Any
 
@@ -7,8 +8,21 @@ from sqlalchemy import delete, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from trialsentinel.db.models import Trial, TrialIntervention, TrialOutcome
-from trialsentinel.ingestion.models import PartialDate, TrialRecord
+from trialsentinel.db.models import (
+    Publication,
+    Trial,
+    TrialIntervention,
+    TrialOutcome,
+    TrialPublicationLink,
+)
+from trialsentinel.ingestion.models import (
+    REGISTRY_LINK_SOURCES,
+    LinkSource,
+    PartialDate,
+    PublicationRecord,
+    TrialRecord,
+    registry_link_source,
+)
 
 
 class UpsertOutcome(StrEnum):
@@ -69,10 +83,16 @@ async def upsert_trial(session: AsyncSession, record: TrialRecord) -> UpsertOutc
     )
     await session.execute(stmt)
 
-    # Child rows are replaced wholesale: simpler and correct for registry amendments.
+    # Registry-owned child rows are replaced wholesale on every change.
     await session.execute(delete(TrialOutcome).where(TrialOutcome.nct_id == record.nct_id))
     await session.execute(
         delete(TrialIntervention).where(TrialIntervention.nct_id == record.nct_id)
+    )
+    await session.execute(
+        delete(TrialPublicationLink).where(
+            TrialPublicationLink.nct_id == record.nct_id,
+            TrialPublicationLink.link_source.in_(REGISTRY_LINK_SOURCES),
+        )
     )
     if record.outcomes:
         await session.execute(
@@ -84,5 +104,88 @@ async def upsert_trial(session: AsyncSession, record: TrialRecord) -> UpsertOutc
             insert(TrialIntervention),
             [{"nct_id": record.nct_id, **i.model_dump()} for i in record.interventions],
         )
+    if record.references:
+        await session.execute(
+            pg_insert(TrialPublicationLink)
+            .values(
+                [
+                    {
+                        "nct_id": record.nct_id,
+                        "pmid": ref.pmid,
+                        "link_source": registry_link_source(ref.type).value,
+                    }
+                    for ref in record.references
+                ]
+            )
+            .on_conflict_do_nothing()
+        )
 
     return UpsertOutcome.INSERTED if existing_hash is None else UpsertOutcome.UPDATED
+
+
+async def add_links(
+    session: AsyncSession, nct_id: str, pmids: Sequence[str], source: LinkSource
+) -> int:
+    """Insert discovered links; returns how many were new."""
+    unique = list(dict.fromkeys(pmids))
+    if not unique:
+        return 0
+    stmt = (
+        pg_insert(TrialPublicationLink)
+        .values([{"nct_id": nct_id, "pmid": p, "link_source": source.value} for p in unique])
+        .on_conflict_do_nothing()
+        .returning(TrialPublicationLink.pmid)
+    )
+    result = await session.execute(stmt)
+    return len(result.scalars().all())
+
+
+async def upsert_publication(session: AsyncSession, record: PublicationRecord) -> UpsertOutcome:
+    existing_hash = await session.scalar(
+        select(Publication.raw_hash).where(Publication.pmid == record.pmid)
+    )
+    if existing_hash == record.raw_hash:
+        return UpsertOutcome.UNCHANGED
+
+    values = {
+        "pmid": record.pmid,
+        "title": record.title,
+        "abstract": record.abstract,
+        "journal": record.journal,
+        "pub_date": _earliest(record.pub_date),
+        "pub_date_precision": _precision(record.pub_date),
+        "doi": record.doi,
+        "publication_types": record.publication_types,
+        "registry_ids": record.registry_ids,
+        "raw_hash": record.raw_hash,
+    }
+    stmt = pg_insert(Publication).values(**values)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[Publication.pmid],
+        set_={key: stmt.excluded[key] for key in values if key != "pmid"}
+        | {"updated_at": func.now()},
+    )
+    await session.execute(stmt)
+    return UpsertOutcome.INSERTED if existing_hash is None else UpsertOutcome.UPDATED
+
+
+async def trials_for_linking(
+    session: AsyncSession, *, statuses: Sequence[str] | None, limit: int
+) -> list[str]:
+    stmt = select(Trial.nct_id)
+    if statuses:
+        stmt = stmt.where(Trial.overall_status.in_([s.upper() for s in statuses]))
+    stmt = stmt.order_by(Trial.primary_completion_date.desc().nulls_last(), Trial.nct_id).limit(
+        limit
+    )
+    return list((await session.scalars(stmt)).all())
+
+
+async def pmids_without_publication(session: AsyncSession) -> list[str]:
+    stmt = (
+        select(TrialPublicationLink.pmid)
+        .outerjoin(Publication, Publication.pmid == TrialPublicationLink.pmid)
+        .where(Publication.pmid.is_(None))
+        .distinct()
+    )
+    return sorted((await session.scalars(stmt)).all())
