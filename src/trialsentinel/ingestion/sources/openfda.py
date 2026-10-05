@@ -11,7 +11,12 @@ from trialsentinel.ingestion.http import SourceHTTPClient
 
 SOURCE_NAME = "openfda_faers"
 EVENT_PATH = "/drug/event.json"
-DRUG_FIELDS = frozenset({"generic_name", "brand_name"})
+# Resolution order matters: harmonised names first, raw reporter text last (lowest precision).
+DRUG_FIELDS = {
+    "generic_name": "patient.drug.openfda.generic_name",
+    "brand_name": "patient.drug.openfda.brand_name",
+    "medicinalproduct": "patient.drug.medicinalproduct",
+}
 
 _SAFE_TERM = re.compile(r"[a-z0-9][a-z0-9 \-]{1,80}")
 _PARENS = re.compile(r"\([^)]*\)|\[[^\]]*\]")
@@ -60,11 +65,12 @@ def normalize_drug_terms(name: str) -> list[str]:
 
 
 def drug_search(term: str, field: str) -> str:
-    if field not in DRUG_FIELDS:
+    path = DRUG_FIELDS.get(field)
+    if path is None:
         raise ValueError(f"unsupported drug field: {field!r}")
     if not _SAFE_TERM.fullmatch(term):
         raise ValueError(f"unsafe drug term: {term!r}")
-    return f'patient.drug.openfda.{field}:"{term}"'
+    return f'{path}:"{term}"'
 
 
 def reaction_search(preferred_term: str) -> str:
