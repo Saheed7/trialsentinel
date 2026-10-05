@@ -13,8 +13,9 @@
   ## 2026-10-05: FAERS disproportionality baseline (snapshot 2026-07-30)
 - 66 distinct drug terms from 75 completed trials; first 10 queried.
 - Resolution: 7/10 via openFDA harmonised generic_name. After adding a reported-name
-  fallback (medicinalproduct): __/10 resolved (__ via fallback).
-  Unresolved before the fix: rosiglitazone (US-approved), vildagliptin (non-US), ruboxistaurin (never approved).
+  fallback (medicinalproduct): 10/10 resolved (3 via fallback: rosiglitazone,
+  vildagliptin, ruboxistaurin mesylate; lower precision, as reporter-entered names).
+  With all 10 resolved: 144/231 top-25 pairs (62%) met Evans criteria.
 - Evans criteria flagged 113/175 top-25 drug-event pairs (65%): low specificity.
 - Positive control recovered: pioglitazone / bladder cancer (PRR 80.4, ROR 95% CI lower 97.1, a = 8,852).
 - Dominant false-signal patterns: indication bias (ciclesonide / asthma, wheezing),
