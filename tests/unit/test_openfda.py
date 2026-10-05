@@ -55,6 +55,13 @@ def test_drug_search_blocks_injection_and_unknown_fields() -> None:
         drug_search("metformin", "manufacturer_name")
 
 
+def test_drug_search_supports_reported_name_fallback() -> None:
+    assert (
+        drug_search("rosiglitazone", "medicinalproduct")
+        == 'patient.drug.medicinalproduct:"rosiglitazone"'
+    )
+
+
 def test_reaction_search_escapes_quotes() -> None:
     assert reaction_search('DRUG "X"') == 'patient.reaction.reactionmeddrapt.exact:"DRUG \\"X\\""'
 

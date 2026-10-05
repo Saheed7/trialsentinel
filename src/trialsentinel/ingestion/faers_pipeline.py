@@ -48,7 +48,7 @@ def _snapshot(last_updated: str | None) -> date:
 
 
 async def _resolve(client: OpenFDAClient, term: str) -> tuple[str, int] | None:
-    for field in ("generic_name", "brand_name"):
+    for field in ("generic_name", "brand_name", "medicinalproduct"):
         total, _ = await client.total_reports(drug_search(term, field))
         if total > 0:
             return field, total
