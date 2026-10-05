@@ -22,6 +22,9 @@ def configure_logging(level: str = "INFO", json_logs: bool = True) -> None:
         cache_logger_on_first_use=True,
     )
 
+    # httpx logs full URLs at INFO, which would leak API keys passed as query params.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     return structlog.get_logger(name)

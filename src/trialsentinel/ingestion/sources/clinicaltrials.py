@@ -11,11 +11,14 @@ from trialsentinel.ingestion.models import (
     OutcomeMeasure,
     PartialDate,
     TrialRecord,
+    TrialReference,
     stable_hash,
 )
 
 SOURCE_NAME = "ctgov"
 MAX_PAGE_SIZE = 1000
+# Bump whenever parse_study changes what it extracts, so stored records are reprocessed.
+PARSER_VERSION = 2
 
 
 class ClinicalTrialsClient:
@@ -38,7 +41,7 @@ class ClinicalTrialsClient:
         if not 1 <= page_size <= MAX_PAGE_SIZE:
             raise ValueError(f"page_size must be between 1 and {MAX_PAGE_SIZE}")
         if max_studies is not None:
-            page_size = min(page_size, max_studies)  # avoid over-fetching small jobs
+            page_size = min(page_size, max_studies)
 
         params: dict[str, Any] = {"format": "json", "pageSize": page_size}
         if condition:
@@ -60,7 +63,7 @@ class ClinicalTrialsClient:
                 if max_studies is not None and yielded >= max_studies:
                     return
             token = page.get("nextPageToken")
-            if not token or token in seen_tokens:  # guard against a repeating cursor
+            if not token or token in seen_tokens:
                 return
             seen_tokens.add(token)
             params["pageToken"] = token
@@ -91,6 +94,18 @@ def _outcomes(
     return result
 
 
+def _references(items: list[dict[str, Any]] | None) -> list[TrialReference]:
+    refs: list[TrialReference] = []
+    seen: set[str] = set()
+    for item in items or []:
+        pmid = str(item.get("pmid") or "").strip()
+        if not pmid.isdigit() or pmid in seen:
+            continue
+        seen.add(pmid)
+        refs.append(TrialReference(pmid=pmid, type=item.get("type"), citation=item.get("citation")))
+    return refs
+
+
 def parse_study(study: dict[str, Any]) -> TrialRecord:
     """Normalise one API v2 study payload. Raises ValueError if it has no NCT ID."""
     protocol = study.get("protocolSection") or {}
@@ -105,7 +120,6 @@ def parse_study(study: dict[str, Any]) -> TrialRecord:
     outcomes = protocol.get("outcomesModule") or {}
     arms = protocol.get("armsInterventionsModule") or {}
     primary_completion = status.get("primaryCompletionDateStruct") or {}
-
     named_interventions = [i for i in arms.get("interventions") or [] if i.get("name")]
 
     return TrialRecord(
@@ -136,5 +150,6 @@ def parse_study(study: dict[str, Any]) -> TrialRecord:
             Intervention(type=i.get("type"), name=i["name"].strip(), position=n)
             for n, i in enumerate(named_interventions)
         ],
-        raw_hash=stable_hash(study),
+        references=_references((protocol.get("referencesModule") or {}).get("references")),
+        raw_hash=stable_hash({"parser_version": PARSER_VERSION, "study": study}),
     )

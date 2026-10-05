@@ -12,10 +12,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-def stable_hash(payload: dict[str, Any]) -> str:
-    """Order-independent SHA-256 of a JSON payload, used for change detection."""
+def stable_hash(payload: Any) -> str:
+    """Order-independent SHA-256 of a JSON-serialisable payload, used for change detection."""
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def stable_bytes_hash(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 class DatePrecision(StrEnum):
@@ -68,6 +72,32 @@ class PartialDate(BaseModel):
         return None
 
 
+class LinkSource(StrEnum):
+    """How a trial-publication link was discovered (evidence provenance)."""
+
+    REGISTRY_RESULT = "registry_result"
+    REGISTRY_BACKGROUND = "registry_background"
+    REGISTRY_DERIVED = "registry_derived"
+    REGISTRY_OTHER = "registry_other"
+    PUBMED_SECONDARY_ID = "pubmed_si"
+    PUBMED_TEXT = "pubmed_tiab"
+
+
+REGISTRY_LINK_SOURCES: tuple[str, ...] = tuple(
+    s.value for s in LinkSource if s.value.startswith("registry_")
+)
+
+_REGISTRY_TYPE_TO_SOURCE = {
+    "RESULT": LinkSource.REGISTRY_RESULT,
+    "BACKGROUND": LinkSource.REGISTRY_BACKGROUND,
+    "DERIVED": LinkSource.REGISTRY_DERIVED,
+}
+
+
+def registry_link_source(reference_type: str | None) -> LinkSource:
+    return _REGISTRY_TYPE_TO_SOURCE.get((reference_type or "").upper(), LinkSource.REGISTRY_OTHER)
+
+
 class OutcomeMeasure(BaseModel):
     kind: Literal["primary", "secondary"]
     position: int
@@ -80,6 +110,12 @@ class Intervention(BaseModel):
     type: str | None = None
     name: str
     position: int
+
+
+class TrialReference(BaseModel):
+    pmid: str
+    type: str | None = None
+    citation: str | None = None
 
 
 class TrialRecord(BaseModel):
@@ -104,4 +140,17 @@ class TrialRecord(BaseModel):
     brief_summary: str | None = None
     outcomes: list[OutcomeMeasure] = Field(default_factory=list)
     interventions: list[Intervention] = Field(default_factory=list)
+    references: list[TrialReference] = Field(default_factory=list)
+    raw_hash: str
+
+
+class PublicationRecord(BaseModel):
+    pmid: str
+    title: str
+    abstract: str | None = None
+    journal: str | None = None
+    pub_date: PartialDate | None = None
+    doi: str | None = None
+    publication_types: list[str] = Field(default_factory=list)
+    registry_ids: list[str] = Field(default_factory=list)  # NCT IDs from PubMed DataBankList
     raw_hash: str
