@@ -141,6 +141,14 @@ class TrialRecord(BaseModel):
     outcomes: list[OutcomeMeasure] = Field(default_factory=list)
     interventions: list[Intervention] = Field(default_factory=list)
     references: list[TrialReference] = Field(default_factory=list)
+    # FDAAA 801 applicability inputs (parser v3)
+    is_fda_regulated_drug: bool | None = None
+    is_fda_regulated_device: bool | None = None
+    is_us_export: bool | None = None
+    location_countries: list[str] = Field(default_factory=list)
+    allocation: str | None = None
+    primary_purpose: str | None = None
+    disp_first_submit_date: PartialDate | None = None
     raw_hash: str
 
 
