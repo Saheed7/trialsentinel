@@ -23,3 +23,17 @@
   (pramlintide / sleep apnoea, a = 5, PRR 53.7).
 - Decision: Phase 2 adds indication and non-clinical term filters plus a shrinkage
   statistic before any agent sees a safety signal.
+
+  ## 2026-10-24: FDAAA 801 funnel (rule v1, as-of 2026-10-05, n = 147)
+- Stale inputs: 72/147 records lacked parser-v3 fields until re-synced by NCT ID;
+  re-sync moved likely_act 12 -> 24 and undetermined 37 -> 22.
+- Applicability: 24 likely_act (8 high-confidence, 16 legacy heuristic),
+  22 undetermined, 101 not_act (not interventional 29; not FDA-regulated 24;
+  no product intervention 18; pre-FDAAA 16; phase 1 drug 14).
+- Findings: 6 results_overdue, 5 results_reported_late; 10/11 industry-sponsored.
+- Funnel: 69 naive candidates -> 3 likely-ACT overdue -> 0 with deadlines in the
+  Final Rule period. All 3 require an approval-status check (pre-2017 statute).
+- 3/6 overdue trials fall outside the naive pool (linked paper or not COMPLETED):
+  journal publication != registry compliance.
+- Decisions: Phase 2b adds a Drugs@FDA approval lookup for pre-Final-Rule
+  findings; future cohorts sampled by primary completion >= 2018.
