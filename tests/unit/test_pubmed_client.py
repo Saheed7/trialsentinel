@@ -6,7 +6,7 @@ from tenacity import wait_none
 
 from trialsentinel.ingestion.http import SourceHTTPClient
 from trialsentinel.ingestion.models import LinkSource
-from trialsentinel.ingestion.sources.pubmed import PubMedClient, PubMedError
+from trialsentinel.ingestion.sources.pubmed import PubMedClient, PubMedError, PubMedTransientError
 
 pytestmark = pytest.mark.anyio
 
@@ -66,3 +66,34 @@ async def test_fetch_xml_rejects_oversized_batches() -> None:
     async with _http(handler) as http:
         with pytest.raises(ValueError, match="at most"):
             await PubMedClient(http).fetch_xml([str(i) for i in range(201)])
+
+
+async def test_transient_backend_error_in_200_body_is_retried() -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(
+                200, json={"esearchresult": {"ERROR": "Search Backend failed: HTTP 502 status"}}
+            )
+        return httpx.Response(200, json={"esearchresult": {"idlist": ["42"]}})
+
+    async with _http(handler) as http:
+        client = PubMedClient(http, retry_wait=wait_none())
+        assert await client.search("NCT01234567[si]") == ["42"]
+    assert calls["n"] == 2
+
+
+async def test_persistent_transient_error_gives_up_after_max_attempts() -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json={"esearchresult": {"ERROR": "Search Backend failed"}})
+
+    async with _http(handler) as http:
+        client = PubMedClient(http, max_attempts=3, retry_wait=wait_none())
+        with pytest.raises(PubMedTransientError):
+            await client.search("x")
+    assert calls["n"] == 3

@@ -9,6 +9,13 @@ from collections.abc import Sequence
 from xml.etree.ElementTree import Element, tostring  # noqa: S405
 
 from defusedxml.ElementTree import fromstring
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
+from tenacity.wait import wait_base
 
 from trialsentinel.ingestion.http import SourceHTTPClient
 from trialsentinel.ingestion.models import (
@@ -27,25 +34,61 @@ _MONTHS = {
         ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1
     )
 }
+# NCBI sometimes reports backend outages inside an HTTP 200 body instead of a 5xx status.
+_TRANSIENT_MARKERS = (
+    "search backend failed",
+    "502",
+    "503",
+    "504",
+    "temporarily unavailable",
+    "timed out",
+)
 
 
 class PubMedError(RuntimeError):
     """E-utilities returned a well-formed response that reports an error."""
 
 
+class PubMedTransientError(PubMedError):
+    """A backend failure reported inside a successful response; safe to retry."""
+
+
+def _classify_error(message: str) -> PubMedError:
+    lowered = message.lower()
+    if any(marker in lowered for marker in _TRANSIENT_MARKERS):
+        return PubMedTransientError(message)
+    return PubMedError(message)
+
+
 class PubMedClient:
-    def __init__(self, http: SourceHTTPClient) -> None:
+    def __init__(
+        self,
+        http: SourceHTTPClient,
+        *,
+        max_attempts: int = 4,
+        retry_wait: wait_base | None = None,
+    ) -> None:
         self._http = http
+        self._max_attempts = max_attempts
+        self._retry_wait = retry_wait or wait_exponential_jitter(initial=2, max=30)
 
     async def search(self, term: str, *, retmax: int = 100) -> list[str]:
-        data = await self._http.get_json(
-            "/esearch.fcgi",
-            params={"db": "pubmed", "term": term, "retmode": "json", "retmax": retmax},
-        )
-        result = data.get("esearchresult") or {}
-        if "ERROR" in result:
-            raise PubMedError(str(result["ERROR"]))
-        return [str(pmid) for pmid in result.get("idlist", [])]
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(self._max_attempts),
+            wait=self._retry_wait,
+            retry=retry_if_exception_type(PubMedTransientError),
+            reraise=True,
+        ):
+            with attempt:
+                data = await self._http.get_json(
+                    "/esearch.fcgi",
+                    params={"db": "pubmed", "term": term, "retmode": "json", "retmax": retmax},
+                )
+                result = data.get("esearchresult") or {}
+                if "ERROR" in result:
+                    raise _classify_error(str(result["ERROR"]))
+                return [str(pmid) for pmid in result.get("idlist", [])]
+        raise RuntimeError("unreachable: retry loop exited without a result")
 
     async def search_trial(self, nct_id: str) -> dict[LinkSource, list[str]]:
         """Search the two PubMed fields that can mention a trial, keeping them separate."""

@@ -117,10 +117,14 @@ def parse_study(study: dict[str, Any]) -> TrialRecord:
     status = protocol.get("statusModule") or {}
     sponsor = (protocol.get("sponsorCollaboratorsModule") or {}).get("leadSponsor") or {}
     design = protocol.get("designModule") or {}
+    design_info = design.get("designInfo") or {}
+    oversight = protocol.get("oversightModule") or {}
     outcomes = protocol.get("outcomesModule") or {}
     arms = protocol.get("armsInterventionsModule") or {}
+    locations = (protocol.get("contactsLocationsModule") or {}).get("locations") or []
     primary_completion = status.get("primaryCompletionDateStruct") or {}
     named_interventions = [i for i in arms.get("interventions") or [] if i.get("name")]
+    countries = sorted({loc["country"].strip() for loc in locations if loc.get("country")})
 
     return TrialRecord(
         nct_id=nct_id,
@@ -151,5 +155,12 @@ def parse_study(study: dict[str, Any]) -> TrialRecord:
             for n, i in enumerate(named_interventions)
         ],
         references=_references((protocol.get("referencesModule") or {}).get("references")),
+        is_fda_regulated_drug=oversight.get("isFdaRegulatedDrug"),
+        is_fda_regulated_device=oversight.get("isFdaRegulatedDevice"),
+        is_us_export=oversight.get("isUsExport"),
+        location_countries=countries,
+        allocation=design_info.get("allocation"),
+        primary_purpose=design_info.get("primaryPurpose"),
+        disp_first_submit_date=PartialDate.parse(status.get("dispFirstSubmitDate")),
         raw_hash=stable_hash({"parser_version": PARSER_VERSION, "study": study}),
     )

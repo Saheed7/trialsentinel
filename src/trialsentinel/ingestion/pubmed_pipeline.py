@@ -25,6 +25,7 @@ from trialsentinel.ingestion.sources.pubmed import (
     EFETCH_BATCH_SIZE,
     SOURCE_NAME,
     PubMedClient,
+    PubMedError,
     parse_pubmed_xml,
 )
 
@@ -35,6 +36,7 @@ class PubMedLinkSummary(BaseModel):
     run_id: uuid.UUID
     status: str
     trials_searched: int
+    search_errors: int
     links_found: int
     links_new: int
     publications_requested: int
@@ -79,7 +81,16 @@ async def link_pubmed(
                 async with sessionmaker() as session:
                     nct_ids = await trials_for_linking(session, statuses=statuses, limit=limit)
                     for nct_id in nct_ids:
-                        found = await client.search_trial(nct_id)
+                        try:
+                            found = await client.search_trial(nct_id)
+                        except PubMedError as exc:
+                            # One trial's failure must not abort the run; a re-run retries it.
+                            counts["search_errors"] += 1
+                            log.warning(
+                                "pubmed_search_failed", nct_id=nct_id, error=type(exc).__name__
+                            )
+                            raw.write({"kind": "esearch_error", "nct_id": nct_id})
+                            continue
                         raw.write(
                             {
                                 "kind": "esearch",
@@ -129,6 +140,7 @@ async def link_pubmed(
         run_id=run_id,
         status=status,
         trials_searched=counts["trials_searched"],
+        search_errors=counts["search_errors"],
         links_found=counts["links_found"],
         links_new=counts["links_new"],
         publications_requested=counts["publications_requested"],

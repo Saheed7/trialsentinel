@@ -1,4 +1,5 @@
 import copy
+from datetime import date
 
 import pytest
 
@@ -85,3 +86,30 @@ def test_registry_references_keep_only_valid_unique_pmids() -> None:
 
 def test_hash_includes_parser_version() -> None:
     assert parse_study(STUDY).raw_hash != stable_hash(STUDY)
+
+
+def test_parses_fdaaa_applicability_inputs() -> None:
+    study = copy.deepcopy(STUDY)
+    protocol = study["protocolSection"]
+    protocol["oversightModule"] = {"isFdaRegulatedDrug": True, "isFdaRegulatedDevice": False}
+    protocol["contactsLocationsModule"] = {
+        "locations": [
+            {"country": "United States"},
+            {"country": "Canada"},
+            {"country": "United States"},
+        ]
+    }
+    protocol["designModule"]["designInfo"] = {
+        "allocation": "RANDOMIZED",
+        "primaryPurpose": "TREATMENT",
+    }
+    protocol["statusModule"]["dispFirstSubmitDate"] = "2021-05-01"
+
+    record = parse_study(study)
+    assert record.is_fda_regulated_drug is True
+    assert record.is_fda_regulated_device is False
+    assert record.is_us_export is None
+    assert record.location_countries == ["Canada", "United States"]
+    assert record.allocation == "RANDOMIZED"
+    assert record.disp_first_submit_date is not None
+    assert record.disp_first_submit_date.earliest == date(2021, 5, 1)

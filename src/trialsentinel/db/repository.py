@@ -63,6 +63,14 @@ def _trial_values(r: TrialRecord) -> dict[str, Any]:
         "last_update_post_date": _earliest(r.last_update_post_date),
         "has_results": r.has_results,
         "brief_summary": r.brief_summary,
+        "is_fda_regulated_drug": r.is_fda_regulated_drug,
+        "is_fda_regulated_device": r.is_fda_regulated_device,
+        "is_us_export": r.is_us_export,
+        "has_us_site": "United States" in r.location_countries,
+        "location_countries": r.location_countries,
+        "allocation": r.allocation,
+        "primary_purpose": r.primary_purpose,
+        "disp_first_submit_date": _earliest(r.disp_first_submit_date),
         "raw_hash": r.raw_hash,
     }
 

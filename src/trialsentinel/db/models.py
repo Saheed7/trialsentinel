@@ -57,6 +57,14 @@ class Trial(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    is_fda_regulated_drug: Mapped[bool | None]
+    is_fda_regulated_device: Mapped[bool | None]
+    is_us_export: Mapped[bool | None]
+    has_us_site: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    location_countries: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    allocation: Mapped[str | None] = mapped_column(String(32))
+    primary_purpose: Mapped[str | None] = mapped_column(String(32))
+    disp_first_submit_date: Mapped[date | None]
 
 
 class TrialOutcome(Base):
@@ -185,5 +193,30 @@ class FaersDrugEventStat(Base):
     chi2: Mapped[float | None] = mapped_column(Float)
     is_signal: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class FdaaaAssessment(Base):
+    """One versioned FDAAA 801 evaluation of a trial as of a given date."""
+
+    __tablename__ = "fdaaa_assessments"
+
+    nct_id: Mapped[str] = mapped_column(
+        ForeignKey("trials.nct_id", ondelete="CASCADE"), primary_key=True
+    )
+    rule_version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    as_of_date: Mapped[date] = mapped_column(primary_key=True)
+    applicability: Mapped[str] = mapped_column(String(16), index=True)
+    applicability_confidence: Mapped[str] = mapped_column(String(8))
+    reporting_status: Mapped[str] = mapped_column(String(24), index=True)
+    standard_deadline: Mapped[date | None]
+    effective_deadline: Mapped[date | None]
+    deadline_extended: Mapped[bool] = mapped_column(Boolean, default=False)
+    days_overdue: Mapped[int | None]
+    days_late: Mapped[int | None]
+    finding: Mapped[str | None] = mapped_column(String(32), index=True)
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
