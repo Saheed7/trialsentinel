@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel, Field
 
 from trialsentinel.core.config import get_settings
-from trialsentinel.guardrails.drug_terms import drop_non_drug_terms
+from trialsentinel.guardrails.drug_terms import normalise_llm_drugs
 from trialsentinel.llm.factory import get_chat_model
 from trialsentinel.llm.usage import UsageCallback
 
@@ -24,6 +24,13 @@ CASES: list[tuple[str, list[str]]] = [
     ("Matching placebo tablet", []),
     ("Dapagliflozin 10mg and saline flush", ["dapagliflozin"]),
 ]
+
+SYSTEM_PROMPT = (
+    "You extract active drug ingredients from clinical-trial intervention descriptions. "
+    "Return generic ingredient names only, in lowercase, without doses, units, dosage forms, "
+    "routes, or brand names. Exclude placebo, saline, vehicle, sham, and standard of care. "
+    "Return an empty list if there are none."
+)
 
 
 class DrugExtraction(BaseModel):
@@ -64,9 +71,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     for text, expected in CASES:
         row: dict[str, object] = {"input": text, "expected": expected}
         try:
-            out = extractor.invoke(f"Intervention: {text}", config={"callbacks": [tracker]})
+            out = extractor.invoke(
+                [("system", SYSTEM_PROMPT), ("human", f"Intervention: {text}")],
+                config={"callbacks": [tracker]},
+            )
             raw = out.drugs if out else []
-            guarded = drop_non_drug_terms(raw)
+            guarded = normalise_llm_drugs(raw)
             valid += 1
             correct_raw += set(raw) == set(expected)
             correct_guarded += set(guarded) == set(expected)
