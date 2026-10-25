@@ -18,7 +18,13 @@ from typing import Any
 from sqlalchemy import select
 
 from trialsentinel.agents.evidence import Case, build_evidence, load_case
-from trialsentinel.agents.labels import LABEL_COLUMN, load_rows, score, write_rows
+from trialsentinel.agents.labels import (
+    LABEL_COLUMN,
+    interactive_label,
+    load_rows,
+    score,
+    write_rows,
+)
 from trialsentinel.agents.missing_results import (
     build_graph,
     format_evidence,
@@ -110,6 +116,8 @@ def _build_parser() -> argparse.ArgumentParser:
     for p in (run, ev):
         p.add_argument("--judge", action="store_true", help="Add the LLM entailment judge")
         p.add_argument("--as-of", type=date.fromisoformat, default=DEFAULT_AS_OF)
+    lb = sub.add_parser("label", help="Label exported claims interactively (blind)")
+    lb.add_argument("path", type=Path)
     sc = sub.add_parser("score-labels", help="Score verifier layers against human labels")
     sc.add_argument("path", type=Path)
     return parser
@@ -121,6 +129,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(score(load_rows(args.path)), indent=2))
         return 0
 
+    if args.command == "label":
+        print(json.dumps(interactive_label(args.path), indent=2))
+        return 0
     # Heavy imports only when a model is needed.
     from qdrant_client import QdrantClient
 

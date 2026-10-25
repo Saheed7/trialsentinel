@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     # --- LLM (provider-agnostic) ---
     llm_provider: Literal["ollama", "openai"] = "ollama"
-    llm_model: str = "llama3.1:8b"
+    llm_model: str = "llama3.1-8k"
     llm_structured_method: Literal["function_calling", "json_schema"] = "json_schema"
     llm_temperature: float = 0.0
     llm_timeout_s: float = 180.0
