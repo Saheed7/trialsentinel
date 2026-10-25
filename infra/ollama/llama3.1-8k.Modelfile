@@ -1,0 +1,4 @@
+# Pins the context window so long evidence packs are never silently truncated.
+# Build:  ollama create llama3.1-8k -f infra/ollama/llama3.1-8k.Modelfile
+FROM llama3.1:8b
+PARAMETER num_ctx 8192
