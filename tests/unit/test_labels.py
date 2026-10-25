@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from trialsentinel.agents.labels import load_rows, score
+from trialsentinel.agents.labels import interactive_label, load_rows, score, write_rows
 
 
 def _row(det: str, judge: str, decision: str, human: str) -> dict[str, str]:
@@ -43,3 +43,34 @@ def test_missing_label_column_is_rejected(tmp_path: Path) -> None:
     path.write_text("decision,claim\nx,y\n", encoding="utf-8")
     with pytest.raises(ValueError, match="human_supported"):
         load_rows(path)
+
+
+def _claim_row(claim: str) -> dict[str, str]:
+    return {
+        "nct_id": "NCT01234567",
+        "round": "0",
+        "decision": "accepted",
+        "deterministic": "pass",
+        "judge": "n/a",
+        "claim": claim,
+        "evidence_ids": "E1",
+        "cited_text": "text",
+        "human_supported": "",
+    }
+
+
+def test_interactive_label_saves_answers_and_stops_on_quit(tmp_path: Path) -> None:
+    path = tmp_path / "claims.csv"
+    write_rows(path, [_claim_row("first"), _claim_row("second")])
+    answers = iter(["maybe", "y", "q"])  # an invalid answer is re-asked, not recorded
+    result = interactive_label(path, ask=lambda _: next(answers), show=lambda _: None)
+    assert [r["human_supported"] for r in load_rows(path)] == ["yes", ""]
+    assert result == {"labelled_now": 1, "labelled_total": 1, "rows": 2}
+
+
+def test_interactive_label_resumes_where_it_stopped(tmp_path: Path) -> None:
+    path = tmp_path / "claims.csv"
+    write_rows(path, [_claim_row("first") | {"human_supported": "yes"}, _claim_row("second")])
+    answers = iter(["n"])
+    interactive_label(path, ask=lambda _: next(answers), show=lambda _: None)
+    assert [r["human_supported"] for r in load_rows(path)] == ["yes", "no"]
