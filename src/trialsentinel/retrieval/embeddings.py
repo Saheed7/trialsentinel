@@ -1,5 +1,11 @@
 """Local, free embedding and reranking models (fastembed / ONNX, CPU). Loaded lazily."""
 
+import os
+
+# Windows without Developer Mode cannot create symlinks; Hugging Face falls back to copies.
+# Caching still works, so silence the repeated warning.
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
 from collections.abc import Iterable, Sequence
 from functools import cached_property
 from pathlib import Path
