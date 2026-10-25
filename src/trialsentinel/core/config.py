@@ -72,6 +72,15 @@ class Settings(BaseSettings):
     llm_price_input_per_mtok: float = 0.0
     llm_price_output_per_mtok: float = 0.0
 
+    # --- retrieval ---
+    qdrant_collection: str = "trialsentinel_chunks"
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    sparse_model: str = "Qdrant/bm25"
+    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    chunk_max_chars: int = 1200
+    chunk_overlap_chars: int = 200
+    model_cache_dir: Path = Path("data/models")
+
     # --- storage ---
     raw_data_dir: Path = Path("data/raw")
 
