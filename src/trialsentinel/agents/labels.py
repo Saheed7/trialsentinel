@@ -45,6 +45,9 @@ def score(rows: Iterable[Mapping[str, str]]) -> dict[str, Any]:
         "claims_labelled": len(labelled),
         "draft_hallucination_rate": _rate(len(unsupported), len(labelled)),
     }
+    if not labelled:
+        report["hint"] = f"no rows contain yes/no in the '{LABEL_COLUMN}' column"
+
     for layer in layers:
         caught = sum(_rejects(r, layer) for r in unsupported)
         false_rejections = sum(_rejects(r, layer) for r in supported)
@@ -66,5 +69,13 @@ def write_rows(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
 
 
 def load_rows(path: Path) -> list[dict[str, str]]:
+    """Reads a labelled CSV, refusing files that would be silently misread."""
     with path.open(newline="", encoding="utf-8-sig") as handle:
-        return list(csv.DictReader(handle))
+        reader = csv.reader(handle)
+        header = next(reader, [])
+        duplicates = sorted({name for name in header if header.count(name) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate column(s) {duplicates} in {path}; keep only one of each")
+        if LABEL_COLUMN not in header:
+            raise ValueError(f"missing '{LABEL_COLUMN}' column in {path}")
+        return [dict(zip(header, row, strict=False)) for row in reader]
