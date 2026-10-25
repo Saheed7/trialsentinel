@@ -22,7 +22,7 @@ _SAFE_TERM = re.compile(r"[a-z0-9][a-z0-9 \-]{1,80}")
 _PARENS = re.compile(r"\([^)]*\)|\[[^\]]*\]")
 _COMBO_SPLIT = re.compile(r"\s*(?:\+|/|,|;|\band\b|\bplus\b)\s*", re.IGNORECASE)
 _DOSE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|ug|µg|g|ml|iu|units?|%)(?=\W|$)", re.IGNORECASE)
-_NON_DRUG_MARKERS = ("placebo", "saline", "vehicle", "standard of care", "usual care", "sham")
+NON_DRUG_MARKERS = ("placebo", "saline", "vehicle", "standard of care", "usual care", "sham")
 _FORM_WORDS = frozenset(
     {
         # dosage forms
@@ -49,7 +49,7 @@ def normalize_drug_terms(name: str) -> list[str]:
     text = _PARENS.sub(" ", name.lower())
     terms: list[str] = []
     for part in _COMBO_SPLIT.split(text):
-        if any(marker in part for marker in _NON_DRUG_MARKERS):
+        if any(marker in part for marker in NON_DRUG_MARKERS):
             continue
         part = _DOSE.sub(" ", part)
         part = re.sub(r"[^a-z0-9\- ]", " ", part)
