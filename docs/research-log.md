@@ -51,3 +51,16 @@
   empty extractions from non-placebo text must be treated as abstentions.
 - Caveat: n = 4; adding a system prompt moved qwen2.5:7b from 4/4 to 3/4. The default
   (llama3.1:8b, json_schema) is provisional pending a labelled ~50-case evaluation.
+
+
+## 2026-10-25: Hybrid retrieval, known-item evaluation (n = 67 queries)
+- Corpus: 147 trials + 247 publications -> 739 chunks (1,200 chars, 200 overlap);
+  bge-small-en-v1.5 (384d) + BM25 sparse (IDF), local CPU, indexed in 89 s.
+- Labels from link provenance (registry_result, pubmed_si): query = trial title,
+  relevant = papers indexed as reporting that trial.
+- hit@1 / hit@5 / MRR@10: dense .791 / .955 / .862; sparse .821 / .925 / .875;
+  hybrid RRF .806 / .955 / .875 (~20 ms); hybrid + MS MARCO rerank .806 / .955 / .867 (3.3 s).
+- Hybrid matches the best single method on each metric at no latency cost; the
+  general-domain reranker adds no quality at 165x latency.
+- Caveats: one query = 1.5 points; title-to-paper is an easy task. Question-level
+  retrieval quality must be measured separately.
