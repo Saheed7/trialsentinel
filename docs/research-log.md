@@ -64,3 +64,18 @@
   general-domain reranker adds no quality at 165x latency.
 - Caveats: one query = 1.5 points; title-to-paper is an easy task. Question-level
   retrieval quality must be measured separately.
+
+## 2026-10-25: Grounding verifier baseline vs human labels (n = 60 claims, 6 cases)
+- Model llama3.1:8b; verifier = deterministic token grounding + same-model judge.
+  Labels: one annotator under docs/labelling-protocol.md v1 (an earlier random
+  labelling pass was discarded). A non-blind cross-check by an LLM agreed on 58/59
+  after protocol clarification; not an inter-annotator estimate.
+- Unsupported claims: 15/60 = 25.0% (95% Wilson CI 15.8-37.2%).
+- Deterministic: caught 4/15, false-rejected 0/45. Judge: caught 4/15, false-rejected
+  3/45. Combined: caught 7/15; residual unsupported rate 25.0% -> 16.0%.
+- Error taxonomy: A audit date added (4, all caught by deterministic); B primary
+  completion stated as completion (5); C "linked" stated as "published/reported" (4);
+  D reversed comparison (1); E unstated effect (1). 13/15 are systematic patterns.
+- Judge false rejections: "no results posted" claims citing "results posted: no".
+- Decision: add prompt-level prevention and typed rules for B and C; evaluate the
+  improved verifier only on a fresh, held-out labelled set (no reuse of these 60).
