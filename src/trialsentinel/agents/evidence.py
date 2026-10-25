@@ -140,7 +140,8 @@ def build_evidence(case: Case, excerpts: Sequence[Hit]) -> list[Evidence]:
 
     add(
         "rule",
-        f"FDAAA 801 rule assessment as of {case.as_of}: applicability {case.applicability} "
+        f"FDAAA 801 rule assessment of {case.nct_id} as of {case.as_of}: "
+        f"applicability {case.applicability} "
         f"({case.applicability_confidence} confidence); reporting status {case.reporting_status}; "
         f"standard deadline {_na(case.standard_deadline)}; effective deadline "
         f"{_na(case.effective_deadline)}; days overdue {_na(case.days_overdue)}; "

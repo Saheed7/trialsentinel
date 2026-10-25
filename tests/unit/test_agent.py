@@ -119,3 +119,30 @@ def test_judge_can_veto_a_claim_that_passes_deterministic_checks() -> None:
     state = _run(build_graph(drafter, judge=lambda c, text: False))
     assert state["status"] == "needs_review"
     assert any("judge" in r["reason"] for r in state["rejected"])
+
+
+def test_subject_trial_id_is_context_not_a_claim() -> None:
+    claim = Claim(text="NCT03317028 is 1993 days overdue.", evidence_ids=["E1"])
+    assert check_claim(claim, EVIDENCE) is not None  # E1 does not contain the ID
+    assert check_claim(claim, EVIDENCE, subject_ids=frozenset({"NCT03317028"})) is None
+
+
+def test_other_trial_ids_must_still_be_grounded() -> None:
+    claim = Claim(text="NCT99999999 is 1993 days overdue.", evidence_ids=["E1"])
+    assert check_claim(claim, EVIDENCE, subject_ids=frozenset({"NCT03317028"})) is not None
+
+
+def test_audit_records_both_layers_for_every_claim() -> None:
+    claim = Claim(text="Results are 1993 days overdue.", evidence_ids=["E1"])
+    drafter, _ = _scripted(Draft(claims=[claim]))
+    state = _run(build_graph(drafter, judge=lambda c, text: True))
+    assert state["audit"] == [
+        {
+            "round": "0",
+            "claim": claim.text,
+            "evidence_ids": "E1",
+            "deterministic": "pass",
+            "judge": "supported",
+            "decision": "accepted",
+        }
+    ]

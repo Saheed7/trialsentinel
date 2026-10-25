@@ -1,8 +1,9 @@
 """Claim-level grounding. Deterministic checks always run; an optional LLM judge checks
-entailment. A claim survives only if every check passes.
+entailment. A claim survives only if every enabled check passes.
 
 The deterministic layer is a lower bound: it catches invented dates, numbers, and
-identifiers, but not a false claim that contains none (that is the judge's job)."""
+identifiers, but not a false claim that contains none (that is the judge's job).
+The audited trial's own ID is context, not a claim, so it is never required in evidence."""
 
 import re
 from collections.abc import Mapping
@@ -50,7 +51,12 @@ def cited_text(claim: Claim, evidence: Mapping[str, Evidence]) -> str:
     return " ".join(evidence[i].text for i in clean_ids(claim.evidence_ids) if i in evidence)
 
 
-def check_claim(claim: Claim, evidence: Mapping[str, Evidence]) -> str | None:
+def check_claim(
+    claim: Claim,
+    evidence: Mapping[str, Evidence],
+    *,
+    subject_ids: frozenset[str] = frozenset(),
+) -> str | None:
     """Returns None if the claim passes, otherwise the rejection reason."""
     ids = clean_ids(claim.evidence_ids)
     if not ids:
@@ -60,6 +66,8 @@ def check_claim(claim: Claim, evidence: Mapping[str, Evidence]) -> str | None:
         return f"cites unknown evidence: {', '.join(unknown)}"
     cited = cited_text(claim, evidence).replace(",", "")
     for token in grounding_tokens(claim.text):
+        if token in subject_ids:
+            continue
         if token not in cited:
             return f"'{token}' does not appear in the cited evidence"
     return None
