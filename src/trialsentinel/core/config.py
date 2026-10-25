@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # from the provider's current price list, so cost reports are never guessed.
     llm_price_input_per_mtok: float = 0.0
     llm_price_output_per_mtok: float = 0.0
-
+    llm_context_tokens: int = 8192  # must match OLLAMA_CONTEXT_LENGTH for local models
     # --- retrieval ---
     qdrant_collection: str = "trialsentinel_chunks"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
