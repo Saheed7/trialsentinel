@@ -51,7 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ping.add_argument(
         "--method",
         choices=["function_calling", "json_schema"],
-        default="function_calling",
+        default=None,
         help="function_calling = model emits a tool call; json_schema = constrained decoding",
     )
     return parser
@@ -62,9 +62,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     settings = get_settings()
     if args.model:
         settings = settings.model_copy(update={"llm_model": args.model})
-
+    method = args.method or settings.llm_structured_method
     tracker = UsageCallback()
-    extractor = get_chat_model(settings).with_structured_output(DrugExtraction, method=args.method)
+    extractor = get_chat_model(settings).with_structured_output(DrugExtraction, method=method)
     results = []
     valid = correct_raw = correct_guarded = 0
     started = time.perf_counter()
@@ -89,7 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     n = len(CASES)
     report = {
         "model": settings.llm_model,
-        "method": args.method,
+        "method": method,
         "valid_outputs": f"{valid}/{n}",
         "accuracy_raw": f"{correct_raw}/{n}",
         "accuracy_guarded": f"{correct_guarded}/{n}",

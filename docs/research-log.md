@@ -37,3 +37,17 @@
   journal publication != registry compliance.
 - Decisions: Phase 2b adds a Drugs@FDA approval lookup for pre-Final-Rule
   findings; future cohorts sampled by primary completion >= 2018.
+
+## 2026-10-24: Local LLM structured extraction (4-case smoke eval, Quadro P2000 4 GB)
+- Hardware: qwen2.5:3b runs 100% GPU (25.9 tok/s); 7-8B models split ~55/45 CPU/GPU (7.5-8.4 tok/s).
+- Without instructions in the prompt, json_schema (constrained decoding) produced valid but
+  semantically wrong output (doses kept, "control group" listed as a drug): constraint
+  guarantees format, not meaning.
+- With a shared system prompt: llama3.1:8b + json_schema 4/4 in 12.1 s with 349 input tokens,
+  vs function_calling 4/4 in 27.0 s with 1041 tokens (2.2x faster, 3x fewer tokens).
+- Failure modes: qwen2.5:7b failed loudly (schema error) where llama3.1:8b failed silently
+  ("placebo" as a drug); a deterministic guardrail corrected the silent case (3/4 -> 4/4).
+- An empty-list schema default turned some loud failures into silent empty answers:
+  empty extractions from non-placebo text must be treated as abstentions.
+- Caveat: n = 4; adding a system prompt moved qwen2.5:7b from 4/4 to 3/4. The default
+  (llama3.1:8b, json_schema) is provisional pending a labelled ~50-case evaluation.
