@@ -9,10 +9,12 @@ Examples:
     uv run python -m trialsentinel.agents.cli calibrate
     uv run python -m trialsentinel.agents.cli label data/eval/claims.csv
     uv run python -m trialsentinel.agents.cli score-labels data/eval/claims.csv
+    uv run python -m trialsentinel.agents.cli agreement data/eval/a.csv data/eval/b.csv
 """
 
 import argparse
 import asyncio
+import csv
 import json
 import time
 from collections.abc import Sequence
@@ -25,6 +27,7 @@ from sqlalchemy import select
 from trialsentinel.agents.evidence import Case, build_evidence, load_case
 from trialsentinel.agents.labels import (
     LABEL_COLUMN,
+    agreement,
     calibrate,
     interactive_label,
     load_rows,
@@ -49,8 +52,22 @@ from trialsentinel.db.session import get_engine, get_sessionmaker
 DEFAULT_AS_OF = date(2026, 10, 5)  # fixed for reproducible runs
 
 
+def _ids_from_csvs(paths: Sequence[Path]) -> set[str]:
+    """Trial IDs already used in earlier evaluation files (development, validation)."""
+    used: set[str] = set()
+    for path in paths:
+        with path.open(newline="", encoding="utf-8-sig") as handle:
+            used |= {row["nct_id"] for row in csv.DictReader(handle) if row.get("nct_id")}
+    return used
+
+
 async def _load_cases(
-    nct_ids: list[str], *, as_of: date, limit: int, offset: int = 0
+    nct_ids: list[str],
+    *,
+    as_of: date,
+    limit: int,
+    offset: int = 0,
+    exclude: frozenset[str] = frozenset(),
 ) -> list[Case]:
     try:
         async with get_sessionmaker()() as session:
@@ -60,6 +77,8 @@ async def _load_cases(
                     .where(
                         FdaaaAssessment.as_of_date == as_of, FdaaaAssessment.finding.is_not(None)
                     )
+                    .where(FdaaaAssessment.nct_id.not_in(exclude))
+                    .distinct()
                     .order_by(FdaaaAssessment.nct_id)
                     .offset(offset)
                     .limit(limit)
@@ -81,6 +100,7 @@ async def _list_findings(as_of: date) -> list[str]:
             stmt = (
                 select(FdaaaAssessment.nct_id)
                 .where(FdaaaAssessment.as_of_date == as_of, FdaaaAssessment.finding.is_not(None))
+                .distinct()
                 .order_by(FdaaaAssessment.nct_id)
             )
             return list((await session.scalars(stmt)).all())
@@ -146,6 +166,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ev = sub.add_parser("eval", help="Run on rule findings; optionally export claims to label")
     ev.add_argument("--limit", type=int, default=6)
     ev.add_argument("--offset", type=int, default=0, help="Skip the first N findings")
+    ev.add_argument(
+        "--exclude",
+        type=Path,
+        action="append",
+        default=[],
+        help="CSV whose trials must not be used (repeatable), e.g. earlier eval files",
+    )
     ev.add_argument("--export", type=Path, default=None, help="CSV of claims for human labelling")
     for p in (run, ev):
         p.add_argument("--judge", action="store_true", help="Add the LLM judge inside the loop")
@@ -164,9 +191,15 @@ def _build_parser() -> argparse.ArgumentParser:
     lb.add_argument(
         "--skip-calibration", action="store_true", help="Only if calibration was passed today"
     )
-    sub.add_parser("calibrate", help="Practice items with known answers, before labelling")
+    lb.add_argument("--calibration-set", choices=["a", "b"], default="a")
+    cb = sub.add_parser("calibrate", help="Practice items with known answers, before labelling")
+    cb.add_argument("--set", dest="calibration_set", choices=["a", "b"], default="a")
     fd = sub.add_parser("findings", help="List rule findings and their eval offsets")
     fd.add_argument("--as-of", type=date.fromisoformat, default=DEFAULT_AS_OF)
+    fd.add_argument("--exclude", type=Path, action="append", default=[])
+    ag = sub.add_parser("agreement", help="Cohen's kappa between two annotators' files")
+    ag.add_argument("path_a", type=Path)
+    ag.add_argument("path_b", type=Path)
     sc = sub.add_parser("score-labels", help="Score verifier layers against human labels")
     sc.add_argument("path", type=Path)
     return parser
@@ -177,26 +210,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "score-labels":
         print(json.dumps(score(load_rows(args.path)), indent=2))
         return 0
+    if args.command == "agreement":
+        print(json.dumps(agreement(load_rows(args.path_a), load_rows(args.path_b)), indent=2))
+        return 0
     if args.command == "calibrate":
-        print(json.dumps(calibrate(), indent=2))
+        print(json.dumps(calibrate(args.calibration_set), indent=2))
         return 0
     if args.command == "label":
-        if not args.skip_calibration and not calibrate()["passed"]:
+        if not args.skip_calibration and not calibrate(args.calibration_set)["passed"]:
             print(json.dumps({"error": "calibration not passed; labelling not started"}))
             return 1
         print(json.dumps(interactive_label(args.path), indent=2))
         return 0
     if args.command == "findings":
         ids = asyncio.run(_list_findings(args.as_of))
+        used = _ids_from_csvs(args.exclude)
+        unused = [nct for nct in ids if nct not in used]
         print(
             json.dumps(
                 {
                     "as_of": args.as_of.isoformat(),
                     "findings": len(ids),
-                    "offsets": {str(i): nct for i, nct in enumerate(ids)},
-                    "development": "offsets 0-5",
-                    "validation (held-out set 1)": "offsets 6-10",
-                    "unused (available for the final test)": max(0, len(ids) - 11),
+                    "already_used": sorted(used & set(ids)),
+                    "unused": unused,
+                    "unused_count": len(unused),
                 },
                 indent=2,
             )
@@ -238,7 +275,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     nct_ids = [args.nct_id] if args.command == "run" else []
     limit = 1 if args.command == "run" else args.limit
     offset = 0 if args.command == "run" else args.offset
-    cases = asyncio.run(_load_cases(nct_ids, as_of=args.as_of, limit=limit, offset=offset))
+    exclude = frozenset(_ids_from_csvs(args.exclude)) if args.command == "eval" else frozenset()
+    cases = asyncio.run(
+        _load_cases(nct_ids, as_of=args.as_of, limit=limit, offset=offset, exclude=exclude)
+    )
     if not cases:
         print(json.dumps({"error": "no assessed trial found; run the rule engine first"}))
         return 1

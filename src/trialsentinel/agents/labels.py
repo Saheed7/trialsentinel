@@ -96,7 +96,7 @@ def load_rows(path: Path) -> list[dict[str, str]]:
 
 
 PROTOCOL_REMINDER = (
-    "Labelling protocol v1 (docs/labelling-protocol.md). Use ONLY the cited evidence.\n"
+    "Labelling protocol v1.1 (docs/labelling-protocol.md). Use ONLY the cited evidence.\n"
     "  y = every part of the claim is stated or paraphrased in the cited evidence\n"
     "  n = any part is missing from, or contradicted by, the cited evidence\n"
     "  1. A date not in the cited evidence (e.g. an added 'as of <date>') -> n\n"
@@ -104,6 +104,7 @@ PROTOCOL_REMINDER = (
     "  3. 'Published' or 'reports the results' from a link alone -> n; 'is linked' -> y\n"
     "  4. Comparisons must keep the direction stated in the evidence\n"
     "  5. Same meaning in other words is fine ('results posted: no' -> 'not posted' = y)\n"
+    "  6. No broadening: 'no PubMed publication' does not support 'no publication' -> n\n"
     "Tip: if the claim copies the evidence word for word, the answer is almost always y.\n"
     "s = skip (undecidable in about a minute), q = quit (progress is saved)."
 )
@@ -225,7 +226,7 @@ CALIBRATION: list[dict[str, str]] = [
         "why": "The comparison is reversed: arm A (120) enrolled more (rule 4).",
     },
     {
-        "claim": "No publication is linked to the trial NCT09990005.",
+        "claim": "No PubMed publication is linked to the trial NCT09990005.",
         "cited": "No PubMed publication is linked to NCT09990005 by any route.",
         "answer": "y",
         "why": "Same meaning as the evidence (rule 5).",
@@ -238,20 +239,101 @@ CALIBRATION: list[dict[str, str]] = [
         "why": "The number is copied exactly from the evidence.",
     },
 ]
+# Set B: fresh items for a retry, so a pass on the second attempt is still a real test.
+CALIBRATION_B: list[dict[str, str]] = [
+    {
+        "claim": "The standard deadline for reporting results of NCT09990011 was 2021-08-15.",
+        "cited": "FDAAA 801 rule assessment of NCT09990011 as of 2026-10-05: reporting status "
+        "overdue; standard deadline 2021-08-15; effective deadline 2021-08-15.",
+        "answer": "y",
+        "why": "The deadline is copied exactly from the evidence.",
+    },
+    {
+        "claim": "The trial NCT09990011 was overdue as of 2025-01-01.",
+        "cited": "FDAAA 801 rule assessment of NCT09990011 as of 2026-10-05: reporting status "
+        "overdue; standard deadline 2021-08-15; effective deadline 2021-08-15.",
+        "answer": "n",
+        "why": "The evidence is dated 2026-10-05; 2025-01-01 appears nowhere in it (rule 1).",
+    },
+    {
+        "claim": "The trial NCT09990012 finished on 2018-02-28.",
+        "cited": "Registry record NCT09990012: overall status COMPLETED; "
+        "primary completion 2018-02-28 (ACTUAL); results posted: yes.",
+        "answer": "n",
+        "why": "'Finished on' presents the PRIMARY completion date as the completion date "
+        "(rule 2).",
+    },
+    {
+        "claim": "The primary completion date of NCT09990012 was 2018-02-28.",
+        "cited": "Registry record NCT09990012: overall status COMPLETED; "
+        "primary completion 2018-02-28 (ACTUAL); results posted: yes.",
+        "answer": "y",
+        "why": "It is called the primary completion date, exactly as in the evidence (rule 2).",
+    },
+    {
+        "claim": "PubMed 90000020 reports the results of the trial NCT09990013.",
+        "cited": "PubMed 90000020 is linked to NCT09990013 via pubmed_tiab; publication types: "
+        "Review; published 2023-05-10; title: Advances in drug Z.",
+        "answer": "n",
+        "why": "Only a link (and a review article) is shown; nothing says it reports "
+        "the results (rule 3).",
+    },
+    {
+        "claim": "PubMed 90000020 was published on 2023-05-10.",
+        "cited": "PubMed 90000020 is linked to NCT09990013 via pubmed_tiab; publication types: "
+        "Review; published 2023-05-10; title: Advances in drug Z.",
+        "answer": "y",
+        "why": "The publication date is copied exactly from the evidence.",
+    },
+    {
+        "claim": "The trial NCT09990014 reported its results 120 days late.",
+        "cited": "FDAAA 801 rule assessment of NCT09990014 as of 2026-10-05: "
+        "reporting status reported_late; days overdue n/a; days late 12.",
+        "answer": "n",
+        "why": "The evidence says 12 days late, not 120 (numbers must match).",
+    },
+    {
+        "claim": "More participants received placebo than the active drug.",
+        "cited": "Excerpt from trial NCT09990015: 200 participants received drug Y "
+        "and 100 received placebo.",
+        "answer": "n",
+        "why": "The comparison is reversed: more received drug Y (rule 4).",
+    },
+    {
+        "claim": "Results for NCT09990015 have been posted to the registry.",
+        "cited": "Registry record NCT09990015: overall status COMPLETED; "
+        "primary completion 2020-01-15 (ACTUAL); results posted: yes.",
+        "answer": "y",
+        "why": "'results posted: yes' means the same thing in other words (rule 5).",
+    },
+    {
+        "claim": "Results for NCT09990016 were first submitted on 2020-05-04.",
+        "cited": "Registry record NCT09990016: overall status COMPLETED; "
+        "results first submitted 2020-05-04; results posted: yes.",
+        "answer": "y",
+        "why": "The date is copied exactly from the evidence.",
+    },
+]
+CALIBRATION_SETS = {"a": CALIBRATION, "b": CALIBRATION_B}
 CALIBRATION_PASS = 9  # of 10
 
 
 def calibrate(
+    set_name: str = "a",
     *,
     ask: Callable[[str], str] = input,
     show: Callable[[str], None] = print,
 ) -> dict[str, Any]:
-    """Runs the practice items, explaining each answer; returns the score and pass/fail."""
-    show(f"CALIBRATION: {len(CALIBRATION)} practice items (made-up trials).\n{PROTOCOL_REMINDER}")
+    """Runs a practice set, explaining each answer; returns the score and pass/fail."""
+    items = CALIBRATION_SETS[set_name]
+    show(
+        f"CALIBRATION set {set_name.upper()}: {len(items)} practice items (made-up trials).\n"
+        f"{PROTOCOL_REMINDER}"
+    )
     correct = 0
-    for position, item in enumerate(CALIBRATION, start=1):
+    for position, item in enumerate(items, start=1):
         show(
-            f"\n[practice {position}/{len(CALIBRATION)}] CLAIM:\n  {item['claim']}\n"
+            f"\n[practice {position}/{len(items)}] CLAIM:\n  {item['claim']}\n"
             f"CITED EVIDENCE:\n  {item['cited']}"
         )
         answer = ""
@@ -263,7 +345,36 @@ def calibrate(
         show(f"{'Correct.' if right else 'Not quite.'} Answer: {expected}. {item['why']}")
     passed = correct >= CALIBRATION_PASS
     show(
-        f"\nScore {correct}/{len(CALIBRATION)}: "
+        f"\nScore {correct}/{len(items)}: "
         + ("passed, ready to label." if passed else "re-read the protocol and try again.")
     )
-    return {"correct": correct, "items": len(CALIBRATION), "passed": passed}
+    return {"set": set_name, "correct": correct, "items": len(items), "passed": passed}
+
+
+def agreement(rows_a: list[Mapping[str, str]], rows_b: list[Mapping[str, str]]) -> dict[str, Any]:
+    """Cohen's kappa between two annotators' labels of the same claims.
+
+    Claims are matched by (claim, cited text), so the two files may differ in row order.
+    Disagreements are listed so they can be adjudicated and reported."""
+    labels_a = {_key(r): _label(r) for r in rows_a if _label(r) in _LABELS}
+    labels_b = {_key(r): _label(r) for r in rows_b if _label(r) in _LABELS}
+    shared = [k for k in labels_a if k in labels_b]
+    n = len(shared)
+    if n == 0:
+        return {"items_compared": 0, "hint": "no claim is labelled in both files"}
+    agree = sum(labels_a[k] == labels_b[k] for k in shared)
+    observed = agree / n
+    yes_a = sum(labels_a[k] == "yes" for k in shared) / n
+    yes_b = sum(labels_b[k] == "yes" for k in shared) / n
+    expected = yes_a * yes_b + (1 - yes_a) * (1 - yes_b)
+    kappa = None if expected == 1 else round((observed - expected) / (1 - expected), 3)
+    return {
+        "items_compared": n,
+        "observed_agreement": round(observed, 3),
+        "cohens_kappa": kappa,
+        "disagreements": [
+            {"claim": k[0], "a": labels_a[k], "b": labels_b[k]}
+            for k in shared
+            if labels_a[k] != labels_b[k]
+        ],
+    }

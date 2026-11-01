@@ -85,3 +85,12 @@
   NCT00934089, NCT01132118, NCT01184755, NCT02115750, NCT02321930, NCT02919761,
   NCT03541174, NCT05573685, NCT05928624.
   Primary result: deterministic+judge_qwen2.5:7b_p2. Other judge columns are secondary.
+
+## Final held-out test (pre-registered 2026-11-01; run 2026-11-01)
+15 unseen trials, 242 audited claims; single annotator (author), agreement pending.
+- Unsupported first drafts: 31/242 = 12.8% (95% CI 9.2-17.6%)
+- Primary, deterministic v3 + Qwen 2.5 7B judge (prompt v2): caught 21/31 (67.7%),
+  wrongly rejected 8/211 (3.8%), residual unsupported 10/213 = 4.7% (95% CI 2.6-8.4%)
+- Deterministic v3 alone: caught 18/31, wrongly rejected 6/211, residual 6.0%
+- LLM judges alone: Qwen 7/31, Llama 4/31 caught
+- Secondary: judge prompt v1 caught 22/31 (not the pre-registered configuration)
