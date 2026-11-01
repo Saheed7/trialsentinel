@@ -23,7 +23,7 @@ from trialsentinel.agents.verifier import (
 
 MAX_REVISIONS = 1
 
-SYSTEM_PROMPT = (
+_PROMPT_V1 = (
     "You explain clinical-trial transparency audit findings. Use only the numbered evidence. "
     "The rule verdict is authoritative: explain it, never contradict or re-decide it. "
     "Write two to five short factual claims about reporting status, deadlines, and "
@@ -31,10 +31,28 @@ SYSTEM_PROMPT = (
     "Copy every number, date, and identifier exactly as it appears in the cited evidence; "
     "never compute, round, or estimate new numbers."
 )
-JUDGE_PROMPT = (
+_PROMPT_V2_RULES = (
+    " Follow these distinctions exactly: (1) the primary completion date is not the "
+    "completion date, so always call it the primary completion date; (2) a linked "
+    "publication is not necessarily the trial's results publication, so say the paper is "
+    "linked, and say it reports the trial's results only when the evidence says the link is "
+    "registry_result; (3) only add a date to a claim if that date appears in the evidence "
+    "you cite for it; (4) state comparisons in exactly the direction the evidence states."
+)
+PROMPTS = {1: _PROMPT_V1, 2: _PROMPT_V1 + _PROMPT_V2_RULES}
+
+_JUDGE_V1 = (
     "You check whether a claim is fully supported by evidence. Answer supported=false if "
     "any part of the claim is missing from, or contradicts, the evidence."
 )
+_JUDGE_V2 = (
+    "You check whether a claim is supported by evidence. Answer supported=true when every "
+    "part of the claim is stated in the evidence, even in different words with the same "
+    "meaning (for example, 'results posted: no' supports 'no results have been posted'). "
+    "Answer supported=false if any part is missing from, or contradicts, the evidence. "
+    "Check the direction of comparisons ('more than', 'less than') carefully."
+)
+JUDGE_PROMPTS = {1: _JUDGE_V1, 2: _JUDGE_V2}
 
 Drafter = Callable[[str, Sequence[Evidence], str | None], Draft]
 Judge = Callable[[Claim, str], bool]
@@ -136,8 +154,11 @@ def build_graph(drafter: Drafter, judge: Judge | None = None) -> Any:
     return graph.compile()
 
 
-def make_llm_drafter(model: BaseChatModel, method: str, callbacks: list[Any]) -> Drafter:
+def make_llm_drafter(
+    model: BaseChatModel, method: str, callbacks: list[Any], *, prompt_version: int = 2
+) -> Drafter:
     structured = model.with_structured_output(Draft, method=method)
+    system_prompt = PROMPTS[prompt_version]
 
     def drafter(verdict: str, evidence: Sequence[Evidence], feedback: str | None) -> Draft:
         human = (
@@ -147,22 +168,25 @@ def make_llm_drafter(model: BaseChatModel, method: str, callbacks: list[Any]) ->
         if feedback:
             human += f"\n\n{feedback}"
         out = structured.invoke(
-            [("system", SYSTEM_PROMPT), ("human", human)], config={"callbacks": callbacks}
+            [("system", system_prompt), ("human", human)], config={"callbacks": callbacks}
         )
         return out if isinstance(out, Draft) else Draft()
 
     return drafter
 
 
-def make_llm_judge(model: BaseChatModel, method: str, callbacks: list[Any]) -> Judge:
+def make_llm_judge(
+    model: BaseChatModel, method: str, callbacks: list[Any], *, prompt_version: int = 1
+) -> Judge:
     structured = model.with_structured_output(Judgement, method=method)
+    system_prompt = JUDGE_PROMPTS[prompt_version]
 
     def judge(claim: Claim, evidence_text: str) -> bool:
         if not evidence_text:
             return False
         out = structured.invoke(
             [
-                ("system", JUDGE_PROMPT),
+                ("system", system_prompt),
                 ("human", f"Evidence:\n{evidence_text}\n\nClaim: {claim.text}"),
             ],
             config={"callbacks": callbacks},

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from trialsentinel.agents.labels import interactive_label, load_rows, score, write_rows
+from trialsentinel.agents.labels import load_rows, score
 
 
 def _row(det: str, judge: str, decision: str, human: str) -> dict[str, str]:
@@ -24,7 +24,8 @@ def test_score_against_human_labels() -> None:
     assert report["deterministic"]["catch_rate"] == 0.333
     assert report["judge"]["catch_rate"] == 0.667
     assert report["judge"]["false_rejection_rate"] == 0.5
-    assert report["combined"]["residual_hallucination_rate"] == 0.5
+    assert report["deterministic+judge"]["catch_rate"] == 0.667
+    assert report["deterministic+judge"]["residual_hallucination_rate"] == 0.5
 
 
 def test_unlabelled_file_gives_a_hint() -> None:
@@ -45,32 +46,52 @@ def test_missing_label_column_is_rejected(tmp_path: Path) -> None:
         load_rows(path)
 
 
-def _claim_row(claim: str) -> dict[str, str]:
-    return {
-        "nct_id": "NCT01234567",
+def test_identical_claims_are_asked_once_and_labelled_together(tmp_path: Path) -> None:
+    from trialsentinel.agents.labels import clear_labels, interactive_label, write_rows
+
+    base = {
+        "nct_id": "N",
         "round": "0",
         "decision": "accepted",
         "deterministic": "pass",
         "judge": "n/a",
-        "claim": claim,
         "evidence_ids": "E1",
-        "cited_text": "text",
         "human_supported": "",
     }
-
-
-def test_interactive_label_saves_answers_and_stops_on_quit(tmp_path: Path) -> None:
-    path = tmp_path / "claims.csv"
-    write_rows(path, [_claim_row("first"), _claim_row("second")])
-    answers = iter(["maybe", "y", "q"])  # an invalid answer is re-asked, not recorded
+    rows = [
+        base | {"claim": "A", "cited_text": "x"},
+        base | {"claim": "B", "cited_text": "y"},
+        base | {"claim": "A", "cited_text": "x"},
+    ]
+    path = tmp_path / "c.csv"
+    write_rows(path, rows)
+    answers = iter(["y", "n"])
     result = interactive_label(path, ask=lambda _: next(answers), show=lambda _: None)
-    assert [r["human_supported"] for r in load_rows(path)] == ["yes", ""]
-    assert result == {"labelled_now": 1, "labelled_total": 1, "rows": 2}
+    labels = [r["human_supported"] for r in load_rows(path)]
+    assert labels == ["yes", "no", "yes"]
+    assert result["labelled_now"] == 2
+    assert clear_labels(path) == 3
+    assert all(r["human_supported"] == "" for r in load_rows(path))
 
 
-def test_interactive_label_resumes_where_it_stopped(tmp_path: Path) -> None:
-    path = tmp_path / "claims.csv"
-    write_rows(path, [_claim_row("first") | {"human_supported": "yes"}, _claim_row("second")])
-    answers = iter(["n"])
-    interactive_label(path, ask=lambda _: next(answers), show=lambda _: None)
-    assert [r["human_supported"] for r in load_rows(path)] == ["yes", "no"]
+def test_calibration_answer_key_scores_full_marks_and_passes() -> None:
+    from trialsentinel.agents.labels import CALIBRATION, calibrate
+
+    key = iter(item["answer"] for item in CALIBRATION)
+    result = calibrate(ask=lambda _: next(key), show=lambda _: None)
+    assert result == {"correct": len(CALIBRATION), "items": len(CALIBRATION), "passed": True}
+
+
+def test_calibration_fails_when_answering_yes_to_everything() -> None:
+    from trialsentinel.agents.labels import calibrate
+
+    result = calibrate(ask=lambda _: "y", show=lambda _: None)
+    assert result["passed"] is False
+
+
+def test_calibration_items_are_fictional_and_balanced() -> None:
+    from trialsentinel.agents.labels import CALIBRATION
+
+    answers = [item["answer"] for item in CALIBRATION]
+    assert answers.count("y") == answers.count("n")
+    assert all("NCT0999" in item["cited"] for item in CALIBRATION)

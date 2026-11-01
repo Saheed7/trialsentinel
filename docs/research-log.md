@@ -79,3 +79,13 @@
 - Judge false rejections: "no results posted" claims citing "results posted: no".
 - Decision: add prompt-level prevention and typed rules for B and C; evaluate the
   improved verifier only on a fresh, held-out labelled set (no reuse of these 60).
+
+## Pre-registration: final held-out test (written before it was run)
+- Test set: rule findings at offsets 11+ (as of 2026-10-05); never used for development or fixes.
+- System: drafter llama3.1-8k, prompt v2; verifier v3; judge qwen2.5:7b, judge prompt v2;
+  a claim is rejected if the deterministic layer or the judge rejects it.
+- Metrics: residual hallucination rate, catch rate, false-rejection rate, with Wilson 95% CIs.
+- Ground truth: two annotators who pass calibration (9/10 or better) label blind under
+  protocol v1; Cohen's kappa is reported, and disagreements are adjudicated and reported.
+- Held-out set 1 (offsets 6-10) is a validation set: it exposed two faults fixed in v3,
+  so its results are not reported as generalisation.
