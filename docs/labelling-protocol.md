@@ -16,3 +16,7 @@ Decision rules:
 4. Comparisons must match the direction stated in the evidence ("more than", "less than").
 5. Paraphrase is acceptable when the meaning is identical ("results posted: no" ->
    "no results have been posted").
+6. No broadening. A claim may not widen the scope of its evidence: "no PubMed publication
+   is linked" does not support "no publication is linked" or "was never published". -> **no**
+
+Changelog: v1.1 (2026-10-31) adds rule 6, found during annotator calibration.
