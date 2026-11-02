@@ -100,3 +100,6 @@ named that condition; all caught by rule C.
 Known regression: v3's negation exemption conflicts with protocol v1.1 rule 6 (1 test miss).
 Candidates for v4, to be evaluated on a new test set: not-linked vs not-published rule,
 late vs overdue check, hedge preservation for low-confidence applicability.
+
+Note: this plan was written on 2026-11-01 before the test was run, but the commit was blocked
+by the no-commit-to-main guard, so it was committed after the run, together with the results.
