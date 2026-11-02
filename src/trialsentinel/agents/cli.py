@@ -16,17 +16,14 @@ import argparse
 import asyncio
 import csv
 import json
-import time
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy import select
 
-from trialsentinel.agents.evidence import Case, build_evidence, load_case
+from trialsentinel.agents.evidence import Case, load_case
 from trialsentinel.agents.labels import (
-    LABEL_COLUMN,
     agreement,
     calibrate,
     interactive_label,
@@ -38,18 +35,18 @@ from trialsentinel.agents.missing_results import (
     JUDGE_PROMPTS,
     PROMPTS,
     build_graph,
-    format_evidence,
     make_llm_drafter,
     make_llm_judge,
 )
 from trialsentinel.agents.offline import recheck, rejudge
+from trialsentinel.agents.service import DEFAULT_AS_OF
+from trialsentinel.agents.service import chat_model as _model
+from trialsentinel.agents.service import run_case as _run_case
 from trialsentinel.agents.verifier import VERIFIER_VERSION
-from trialsentinel.core.config import Settings, get_settings
+from trialsentinel.core.config import get_settings
 from trialsentinel.core.logging import configure_logging
 from trialsentinel.db.models import FdaaaAssessment
 from trialsentinel.db.session import get_engine, get_sessionmaker
-
-DEFAULT_AS_OF = date(2026, 10, 5)  # fixed for reproducible runs
 
 
 def _ids_from_csvs(paths: Sequence[Path]) -> set[str]:
@@ -106,56 +103,6 @@ async def _list_findings(as_of: date) -> list[str]:
             return list((await session.scalars(stmt)).all())
     finally:
         await get_engine().dispose()
-
-
-def _model(s: Settings, name: str | None) -> Any:
-    from trialsentinel.llm.factory import get_chat_model
-
-    return get_chat_model(s.model_copy(update={"llm_model": name}) if name else s)
-
-
-def _run_case(case: Case, retriever: Any, graph: Any, context_tokens: int) -> dict[str, Any]:
-    hits = retriever.search(case.brief_title, limit=3, mode="hybrid", nct_id=case.nct_id)
-    evidence = build_evidence(case, hits)
-    by_id = {e.id: e.text for e in evidence}
-    estimated_tokens = len(format_evidence(evidence)) // 4 + 400  # rough: 4 chars/token + prompt
-    started = time.perf_counter()
-    state = graph.invoke(
-        {
-            "nct_id": case.nct_id,
-            "verdict": case.verdict,
-            "evidence": evidence,
-            "revisions": 0,
-            "rejected": [],
-            "audit": [],
-            "rounds": [],
-        }
-    )
-    audit_rows = [
-        row
-        | {
-            "nct_id": case.nct_id,
-            "cited_text": " | ".join(by_id.get(i, "") for i in row["evidence_ids"].split(",") if i),
-            LABEL_COLUMN: "",
-        }
-        for row in state.get("audit", [])
-    ]
-    return {
-        "nct_id": case.nct_id,
-        "verdict": case.verdict,
-        "status": state["status"],
-        "claims": [
-            {"text": c.text, "evidence_ids": c.evidence_ids} for c in state.get("verified", [])
-        ],
-        "rejected": state.get("rejected", []),
-        "rounds": state.get("rounds", []),
-        "revisions": state.get("revisions", 0),
-        "evidence": [{"id": e.id, "kind": e.kind, "text": e.text} for e in evidence],
-        "audit_rows": audit_rows,
-        "estimated_prompt_tokens": estimated_tokens,
-        "context_warning": estimated_tokens > context_tokens,
-        "seconds": round(time.perf_counter() - started, 1),
-    }
 
 
 def _build_parser() -> argparse.ArgumentParser:
