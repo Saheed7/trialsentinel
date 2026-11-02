@@ -86,11 +86,17 @@
   NCT03541174, NCT05573685, NCT05928624.
   Primary result: deterministic+judge_qwen2.5:7b_p2. Other judge columns are secondary.
 
-## Final held-out test (pre-registered 2026-11-01; run 2026-11-01)
-15 unseen trials, 242 audited claims; single annotator (author), agreement pending.
-- Unsupported first drafts: 31/242 = 12.8% (95% CI 9.2-17.6%)
-- Primary, deterministic v3 + Qwen 2.5 7B judge (prompt v2): caught 21/31 (67.7%),
-  wrongly rejected 8/211 (3.8%), residual unsupported 10/213 = 4.7% (95% CI 2.6-8.4%)
-- Deterministic v3 alone: caught 18/31, wrongly rejected 6/211, residual 6.0%
-- LLM judges alone: Qwen 7/31, Llama 4/31 caught
-- Secondary: judge prompt v1 caught 22/31 (not the pre-registered configuration)
+## Final held-out test results (pre-registered 2026-11-01)
+15 unseen trials, 242 audited claims; single annotator (author); agreement pending.
+Primary (deterministic v3 + Qwen 2.5 7B judge, prompt v2):
+- Labels as given: 31/242 unsupported (12.8%); caught 21/31; wrongly rejected 8/211;
+  residual 10/213 = 4.7% (95% CI 2.6-8.4%)
+- Rule 3 strict (7 publication claims re-read per protocol): 38/242 (15.7%); caught 28/38;
+  wrongly rejected 1/204; residual 10/213 = 4.7% (95% CI 2.6-8.4%)
+Misses: 3 scope broadening, 3 overstated certainty, 2 late-as-overdue, 1 meta-claim,
+1 possible label slip (row 65, for adjudication).
+Prompt-induced error: 9 claims falsely asserted a "registry_result link" after prompt v2
+named that condition; all caught by rule C.
+Known regression: v3's negation exemption conflicts with protocol v1.1 rule 6 (1 test miss).
+Candidates for v4, to be evaluated on a new test set: not-linked vs not-published rule,
+late vs overdue check, hedge preservation for low-confidence applicability.
