@@ -1,5 +1,6 @@
 from concurrent.futures import Executor, Future
-from datetime import date
+from dataclasses import replace
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -7,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trialsentinel.agents.service import AuditOptions
+from trialsentinel.api.jobs import AuditJob, AuditJobs
 from trialsentinel.api.main import create_app
 from trialsentinel.api.schemas import Assessment, Finding
 from trialsentinel.api.security import ApiSettings, hash_key, new_key
@@ -36,6 +38,7 @@ class NeverExecutor(Executor):
 class FakeStore:
     def __init__(self, *, healthy: bool = True) -> None:
         self.healthy = healthy
+        self.audits = {}
 
     async def ping(self) -> None:
         if not self.healthy:
@@ -79,6 +82,31 @@ class FakeStore:
 
     async def case(self, nct_id: str, as_of: date) -> Any:
         return SimpleNamespace(nct_id=nct_id) if nct_id == NCT else None
+
+    # Durable audits, with the same newer-revision-wins rule as the SQL upsert.
+    audits: dict[str, AuditJob]
+    fail_saves: bool = False
+
+    async def save_audit(self, job: AuditJob) -> None:
+        if self.fail_saves:
+            raise ConnectionError("database down")
+        stored = self.audits.get(job.audit_id)
+        if stored is None or stored.revision < job.revision:
+            self.audits[job.audit_id] = replace(job)
+
+    async def load_audit(self, audit_id: str) -> AuditJob | None:
+        job = self.audits.get(audit_id)
+        return replace(job) if job else None
+
+    async def list_audits(self, nct_id: str, limit: int) -> list[AuditJob]:
+        jobs = [j for j in self.audits.values() if j.nct_id == nct_id]
+        return sorted(jobs, key=lambda j: j.submitted_at, reverse=True)[:limit]
+
+    async def mark_interrupted(self) -> int:
+        stuck = [j for j in self.audits.values() if j.status in ("queued", "running")]
+        for job in stuck:
+            job.status, job.error, job.revision = "failed", "interrupted", job.revision + 1
+        return len(stuck)
 
 
 def fake_runner(case: Any, options: AuditOptions) -> dict[str, Any]:
@@ -212,3 +240,88 @@ def test_generated_keys_are_unique_and_hash_stably() -> None:
     a, b = new_key(), new_key()
     assert a != b and a.startswith("ts_")
     assert hash_key(a) == hash_key(a) and len(hash_key(a)) == 64
+
+
+# --- Persistence -------------------------------------------------------------------------
+
+
+def test_job_changes_are_reported_in_order_with_rising_revisions() -> None:
+    seen: list[tuple[str, int]] = []
+    jobs = AuditJobs(
+        fake_runner,
+        executor=InlineExecutor(),
+        on_change=lambda job: seen.append((job.status, job.revision)),
+    )
+    jobs.submit(SimpleNamespace(nct_id=NCT), AuditOptions(), as_of=AS_OF)
+    assert seen == [("queued", 0), ("running", 1), ("succeeded", 2)]
+
+
+def test_finished_audit_is_persisted_with_options_and_key_fingerprint() -> None:
+    store = FakeStore()
+    with make_client(store=store) as client:
+        audit_id = client.post("/v1/audits", json={"nct_id": NCT}, headers=AUTH).json()["audit_id"]
+        client.get("/healthz")  # let the event loop run the scheduled writes
+    saved = store.audits[audit_id]
+    assert saved.status == "succeeded"
+    assert saved.revision == 2
+    assert saved.options["prompt_version"] == 2
+    assert saved.key_fingerprint == hash_key(KEY)[:8]
+
+
+def test_audit_survives_a_restart() -> None:
+    store = FakeStore()
+    with make_client(store=store) as client:
+        audit_id = client.post("/v1/audits", json={"nct_id": NCT}, headers=AUTH).json()["audit_id"]
+        client.get("/healthz")
+    with make_client(store=store) as restarted:  # a new process: empty memory, same database
+        body = restarted.get(f"/v1/audits/{audit_id}", headers=AUTH).json()
+    assert body["status"] == "succeeded"
+    assert body["result"]["claims"][0]["evidence_ids"] == ["E2"]
+
+
+def test_audits_left_running_by_a_crash_are_marked_failed_at_startup() -> None:
+    store = FakeStore()
+    stuck = AuditJob(
+        audit_id="a" * 32,
+        nct_id=NCT,
+        as_of=AS_OF,
+        submitted_at=datetime.now(UTC),
+        status="running",
+        revision=1,
+    )
+    store.audits[stuck.audit_id] = stuck
+    with make_client(store=store) as client:
+        body = client.get(f"/v1/audits/{stuck.audit_id}", headers=AUTH).json()
+    assert body["status"] == "failed"
+    assert body["error"] == "interrupted"
+
+
+def test_older_snapshot_never_overwrites_a_newer_one() -> None:
+    import asyncio
+
+    store = FakeStore()
+    base = AuditJob(audit_id="b" * 32, nct_id=NCT, as_of=AS_OF, submitted_at=datetime.now(UTC))
+    asyncio.run(store.save_audit(replace(base, status="succeeded", revision=2)))
+    asyncio.run(store.save_audit(replace(base, status="running", revision=1)))  # arrives late
+    assert store.audits[base.audit_id].status == "succeeded"
+
+
+def test_database_outage_does_not_break_audits() -> None:
+    store = FakeStore()
+    store.fail_saves = True
+    with make_client(store=store) as client:
+        audit_id = client.post("/v1/audits", json={"nct_id": NCT}, headers=AUTH).json()["audit_id"]
+        body = client.get(f"/v1/audits/{audit_id}", headers=AUTH).json()
+    assert body["status"] == "succeeded"  # served from memory; the failed write is logged
+
+
+def test_trial_audit_history_is_newest_first() -> None:
+    store = FakeStore()
+    with make_client(store=store) as client:
+        first = client.post("/v1/audits", json={"nct_id": NCT}, headers=AUTH).json()["audit_id"]
+        second = client.post("/v1/audits", json={"nct_id": NCT}, headers=AUTH).json()["audit_id"]
+        client.get("/healthz")
+        history = client.get(f"/v1/trials/{NCT}/audits", headers=AUTH).json()
+    assert [h["audit_id"] for h in history] == [second, first]
+    assert history[0]["outcome"] == "verified"
+    assert history[0]["verified_claims"] == 1

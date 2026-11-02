@@ -1,14 +1,21 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Request, Response, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response, status
 
 from trialsentinel.agents.service import AuditOptions
 from trialsentinel.api.jobs import AuditJob, QueueFull
-from trialsentinel.api.schemas import AuditRequest, AuditResult, AuditStatus
+from trialsentinel.api.schemas import (
+    AuditRequest,
+    AuditResult,
+    AuditStatus,
+    AuditSummary,
+    NctId,
+)
 from trialsentinel.api.security import ApiKey
 from trialsentinel.core.logging import get_logger
 
 router = APIRouter(prefix="/v1/audits", tags=["audits"])
+history = APIRouter(prefix="/v1/trials", tags=["audits"])
 log = get_logger(__name__)
 
 
@@ -62,7 +69,7 @@ async def create_audit(
         judge_prompt_version=body.judge_prompt_version,
     )
     try:
-        job = request.app.state.jobs.submit(case, options, as_of=body.as_of)
+        job = request.app.state.jobs.submit(case, options, as_of=body.as_of, key_fingerprint=key)
     except QueueFull:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
@@ -80,7 +87,36 @@ async def get_audit(
     _key: ApiKey,
     audit_id: Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")],
 ) -> AuditStatus:
-    job = request.app.state.jobs.get(audit_id)
+    # Recent and running audits are in memory; older ones (and those from before a restart)
+    # come from the database.
+    job = request.app.state.jobs.get(audit_id) or await request.app.state.store.load_audit(audit_id)
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown audit id")
     return _status(job)
+
+
+@history.get(
+    "/{nct_id}/audits",
+    response_model=list[AuditSummary],
+    summary="Audit history for one trial, newest first",
+)
+async def list_trial_audits(
+    request: Request,
+    _key: ApiKey,
+    nct_id: Annotated[NctId, Path()],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> list[AuditSummary]:
+    jobs = await request.app.state.store.list_audits(nct_id, limit)
+    return [
+        AuditSummary(
+            audit_id=j.audit_id,
+            nct_id=j.nct_id,
+            as_of=j.as_of,
+            status=j.status,
+            submitted_at=j.submitted_at,
+            finished_at=j.finished_at,
+            outcome=(j.result or {}).get("status"),
+            verified_claims=len((j.result or {}).get("claims", [])),
+        )
+        for j in jobs
+    ]
