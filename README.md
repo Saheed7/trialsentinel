@@ -64,6 +64,39 @@ non-clinical terms, is the motivation for the next phase: typed evidence rules a
 shrinkage statistics *before* any agent reasons over a signal. The dated analysis is
 in [`docs/research-log.md`](docs/research-log.md).
 
+## Results
+### Claim verification: pre-registered held-out test
+The agent explains rule-engine verdicts in natural-language claims, each citing its evidence.
+A layered verifier (deterministic grounding rules, then a 7B LLM judge) rejects claims the
+evidence does not support. Evaluated on 15 trials never used in development, frozen and
+pre-registered before the run, with 242 claims labelled by two calibrated annotators
+(Cohen's kappa = 0.98):
+
+| Configuration | Unsupported claims reaching output |
+|---|---|
+| No verification | 12.4% (95% CI 8.8–17.1%) |
+| LLM judge alone (Qwen 2.5 7B) | 9.9% |
+| Deterministic rules alone | 5.5% |
+| **Deterministic + LLM judge (pre-registered)** | **4.2% (95% CI 2.2–7.8%)** |
+
+The verifier caught 70% of unsupported claims while wrongly rejecting 3.8% of correct ones.
+The result is unchanged under a stricter reading of the labelling protocol (sensitivity
+analysis in `docs/research-log.md`).
+
+**Findings**
+- Cheap deterministic checks catch most errors. Small LLM judges alone catch only 13–23%.
+- A prevention prompt induced the error it warned against: after being told when a paper
+  counts as a trial's results publication, the model falsely claimed that condition 9 times.
+  All 9 were caught by a deterministic rule.
+
+Method: written labelling protocol (`docs/labelling-protocol.md`), annotator calibration
+(at least 9/10 on practice items), blind deduplicated labelling, and a pre-registered primary
+metric. Development and validation results are reported separately in the research log.
+
+ The dated analysis is
+in [`docs/research-log.md`](docs/research-log.md).
+
+
 ## Architecture
 
 ```mermaid
