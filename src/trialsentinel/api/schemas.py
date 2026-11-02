@@ -79,6 +79,17 @@ class AuditResult(BaseModel):
     judge: bool
 
 
+class AuditSummary(BaseModel):
+    audit_id: str
+    nct_id: str
+    as_of: date
+    status: AuditState
+    submitted_at: datetime
+    finished_at: datetime | None = None
+    outcome: Literal["verified", "needs_review"] | None = None
+    verified_claims: int = 0
+
+
 class AuditStatus(BaseModel):
     audit_id: str
     nct_id: str

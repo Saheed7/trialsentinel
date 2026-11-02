@@ -220,3 +220,25 @@ class FdaaaAssessment(Base):
     evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class AgentAudit(Base):
+    """One agent audit request: its options, lifecycle, result and full audit trail.
+
+    `revision` rises with every state change; writes apply only if newer (see the API store)."""
+
+    __tablename__ = "agent_audits"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    nct_id: Mapped[str] = mapped_column(ForeignKey("trials.nct_id", ondelete="CASCADE"), index=True)
+    as_of_date: Mapped[date]
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    options: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    key_fingerprint: Mapped[str | None] = mapped_column(String(16))
+    verifier_version: Mapped[int | None] = mapped_column(Integer)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

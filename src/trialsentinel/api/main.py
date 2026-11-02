@@ -4,15 +4,16 @@ uv run uvicorn trialsentinel.api.main:app --port 8000
 open http://127.0.0.1:8000/docs
 """
 
+import asyncio
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from concurrent.futures import Executor
+from concurrent.futures import Executor, Future
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 
-from trialsentinel.api.jobs import AuditJobs, Runner
+from trialsentinel.api.jobs import AuditJob, AuditJobs, Runner
 from trialsentinel.api.routes import audits, health, ready, trials
 from trialsentinel.api.security import ApiSettings
 from trialsentinel.api.store import SqlTrialStore, TrialStore
@@ -38,18 +39,38 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.api_settings = api
-        app.state.store = store or SqlTrialStore()
+        app.state.store = active_store = store or SqlTrialStore()
         if runner is None:
             from trialsentinel.agents.service import AgentRunner
 
             run = AgentRunner(settings, judge_model=api.judge_model).run
         else:
             run = runner
+
+        try:
+            interrupted = await active_store.mark_interrupted()
+            if interrupted:
+                log.warning("audits_marked_interrupted", count=interrupted)
+        except Exception:  # the database may be down at startup; /readyz reports it
+            log.exception("mark_interrupted_failed")
+
+        loop = asyncio.get_running_loop()
+
+        def _log_persist_error(future: Future[None]) -> None:
+            if not future.cancelled() and future.exception() is not None:
+                log.error("audit_persist_failed", error=repr(future.exception()))
+
+        def persist(job: AuditJob) -> None:
+            # Called from the worker thread too: hand the write to the app's event loop.
+            future = asyncio.run_coroutine_threadsafe(active_store.save_audit(job), loop)
+            future.add_done_callback(_log_persist_error)
+
         app.state.jobs = AuditJobs(
             run,
             executor=executor,
             max_queued=api.max_queued_audits,
             max_stored=api.max_stored_audits,
+            on_change=persist,
         )
         if not api.key_hashes():
             log.warning("no_api_keys_configured", hint="protected endpoints will return 503")
@@ -87,6 +108,7 @@ def create_app(
     app.include_router(ready.router)
     app.include_router(trials.router)
     app.include_router(audits.router)
+    app.include_router(audits.history)
     return app
 
 
