@@ -35,6 +35,7 @@ def _status(job: AuditJob) -> AuditStatus:
             verifier_version=r["verifier_version"],
             prompt_version=r["prompt_version"],
             judge=r["judge"],
+            trace=r.get("trace"),
         )
     return AuditStatus(
         audit_id=job.audit_id,

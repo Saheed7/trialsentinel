@@ -7,7 +7,12 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from trialsentinel.agents.service import AuditOptions
+from trialsentinel.agents.service import (
+    AgentRunner,
+    AuditOptions,
+    decision_category,
+    summarize_decisions,
+)
 from trialsentinel.api.jobs import AuditJob, AuditJobs
 from trialsentinel.api.main import create_app
 from trialsentinel.api.schemas import Assessment, Finding
@@ -122,6 +127,17 @@ def fake_runner(case: Any, options: AuditOptions) -> dict[str, Any]:
         "verifier_version": 3,
         "prompt_version": options.prompt_version,
         "judge": options.judge,
+        "trace": {
+            "retrieval_ms": 21.0,
+            "agent_s": 1.5,
+            "llm_calls": 2,
+            "llm_latency_s": 1.2,
+            "input_tokens": 1800,
+            "output_tokens": 300,
+            "estimated_prompt_tokens": 1500,
+            "context_warning": False,
+            "decisions": {"deterministic": {"pass": 3, "rule_b": 1}, "judge": {"supported": 3}},
+        },
     }
 
 
@@ -325,3 +341,116 @@ def test_trial_audit_history_is_newest_first() -> None:
     assert [h["audit_id"] for h in history] == [second, first]
     assert history[0]["outcome"] == "verified"
     assert history[0]["verified_claims"] == 1
+
+
+# --- Observability -----------------------------------------------------------------------
+
+
+def _metric(text: str, name: str, **labels: str) -> float:
+    """Reads one sample from Prometheus text output; 0.0 if absent."""
+    wanted = ",".join(f'{k}="{v}"' for k, v in labels.items())
+    prefix = f"{name}{{{wanted}}}" if labels else name
+    for line in text.splitlines():
+        if line.startswith(prefix + " "):
+            return float(line.split()[-1])
+    return 0.0
+
+
+@pytest.mark.parametrize(
+    ("reason", "category"),
+    [
+        ("pass", "pass"),
+        ("rule B: a primary completion date is presented as the completion date", "rule_b"),
+        ("rule C: a linked paper is presented as the trial's publication", "rule_c"),
+        ("cites no evidence", "structure"),
+        ("cites unknown evidence: E9", "structure"),
+        ("'2026-10-05' does not appear in the cited evidence", "token"),
+        ("something new", "other"),
+    ],
+)
+def test_decision_categories_are_a_small_fixed_set(reason: str, category: str) -> None:
+    assert decision_category(reason) == category
+
+
+def test_decisions_are_counted_per_layer_across_rounds() -> None:
+    rows = [
+        {"deterministic": "pass", "judge": "supported"},
+        {"deterministic": "rule B: x", "judge": "n/a"},
+        {"deterministic": "pass", "judge": "unsupported"},
+    ]
+    assert summarize_decisions(rows) == {
+        "deterministic": {"pass": 2, "rule_b": 1},
+        "judge": {"supported": 1, "unsupported": 1},
+    }
+
+
+def test_metrics_label_routes_by_template_never_by_id() -> None:
+    with make_client() as client:
+        audit_id = client.post("/v1/audits", json={"nct_id": NCT}, headers=AUTH).json()["audit_id"]
+        client.get(f"/v1/audits/{audit_id}", headers=AUTH)
+        text = client.get("/metrics").text
+    labels = {"method": "GET", "route": "/v1/audits/{audit_id}", "status": "200"}
+    assert _metric(text, "trialsentinel_http_requests_total", **labels) == 1.0
+    assert audit_id not in text and NCT not in text
+
+
+def test_finished_audit_updates_audit_llm_and_verifier_metrics() -> None:
+    with make_client() as client:
+        client.post("/v1/audits", json={"nct_id": NCT}, headers=AUTH)
+        text = client.get("/metrics").text
+    assert _metric(text, "trialsentinel_audits_total", status="succeeded") == 1.0
+    assert _metric(text, "trialsentinel_llm_calls_total") == 2.0
+    assert _metric(text, "trialsentinel_llm_tokens_total", direction="input") == 1800.0
+    decisions = "trialsentinel_verifier_decisions_total"
+    assert _metric(text, decisions, layer="deterministic", outcome="rule_b") == 1.0
+    assert _metric(text, decisions, layer="judge", outcome="supported") == 3.0
+    assert _metric(text, "trialsentinel_claims_total", decision="verified") == 1.0
+    assert _metric(text, "trialsentinel_audit_duration_seconds_count") == 1.0
+
+
+def test_queue_depth_gauge_counts_waiting_audits() -> None:
+    with make_client(executor=NeverExecutor()) as client:
+        client.post("/v1/audits", json={"nct_id": NCT}, headers=AUTH)
+        text = client.get("/metrics").text
+    assert _metric(text, "trialsentinel_audit_queue_depth") == 1.0
+
+
+def test_audit_response_includes_the_trace() -> None:
+    with make_client() as client:
+        audit_id = client.post("/v1/audits", json={"nct_id": NCT}, headers=AUTH).json()["audit_id"]
+        trace = client.get(f"/v1/audits/{audit_id}", headers=AUTH).json()["result"]["trace"]
+    assert trace["llm_calls"] == 2
+    assert trace["decisions"]["deterministic"]["rule_b"] == 1
+
+
+def test_runner_trace_reports_this_audits_usage_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Evidence building is tested elsewhere; this test is only about the usage deltas.
+    from trialsentinel.agents import service
+
+    monkeypatch.setattr(service, "build_evidence", lambda case, hits: [])
+    monkeypatch.setattr(service, "format_evidence", lambda evidence: "")
+    settings = SimpleNamespace(llm_context_tokens=8192)
+    runner = AgentRunner(settings)  # type: ignore[arg-type]
+    runner._usage.totals.calls, runner._usage.totals.input_tokens = 5, 9000  # earlier audits
+
+    class FakeGraph:
+        def invoke(self, state: dict[str, Any]) -> dict[str, Any]:
+            runner._usage.totals.calls += 2  # this audit's two LLM calls
+            runner._usage.totals.input_tokens += 1200
+            runner._usage.totals.output_tokens += 250
+            return {
+                "status": "verified",
+                "verified": [],
+                "audit": [{"evidence_ids": "E1", "deterministic": "rule B: x", "judge": "n/a"}],
+            }
+
+    class FakeRetriever:
+        def search(self, *args: Any, **kwargs: Any) -> list[Any]:
+            return []
+
+    runner._retriever = FakeRetriever()
+    runner._graphs[AuditOptions()] = FakeGraph()
+    case = SimpleNamespace(nct_id=NCT, brief_title="t", verdict="overdue")
+    trace = runner.run(case, AuditOptions())["trace"]  # type: ignore[arg-type]
+    assert (trace["llm_calls"], trace["input_tokens"], trace["output_tokens"]) == (2, 1200, 250)
+    assert trace["decisions"]["deterministic"] == {"rule_b": 1}
