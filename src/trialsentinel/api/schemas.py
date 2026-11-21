@@ -65,6 +65,22 @@ class EvidenceItem(BaseModel):
     text: str
 
 
+class AuditTrace(BaseModel):
+    """Where the time and tokens went, and what each verifier layer decided."""
+
+    retrieval_ms: float
+    agent_s: float
+    llm_calls: int
+    llm_latency_s: float
+    input_tokens: int
+    output_tokens: int
+    estimated_prompt_tokens: int
+    context_warning: bool
+    decisions: dict[str, dict[str, int]] = Field(
+        description="Claim decisions per layer, e.g. deterministic: {pass: 8, rule_b: 1}"
+    )
+
+
 class AuditResult(BaseModel):
     verdict: str
     status: Literal["verified", "needs_review"]
@@ -77,6 +93,9 @@ class AuditResult(BaseModel):
     verifier_version: int
     prompt_version: int
     judge: bool
+    trace: AuditTrace | None = Field(
+        default=None, description="Absent for audits recorded before tracing was added"
+    )
 
 
 class AuditSummary(BaseModel):

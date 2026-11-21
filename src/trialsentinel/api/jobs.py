@@ -98,6 +98,10 @@ class AuditJobs:
         self._executor.submit(self._run, job, case, options)
         return snapshot
 
+    def active_count(self) -> int:
+        with self._lock:
+            return sum(j.status in ACTIVE for j in self._jobs.values())
+
     def get(self, audit_id: str) -> AuditJob | None:
         with self._lock:
             job = self._jobs.get(audit_id)
