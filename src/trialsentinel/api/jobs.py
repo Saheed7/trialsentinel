@@ -88,6 +88,7 @@ class AuditJobs:
                     "prompt_version": options.prompt_version,
                     "judge": options.judge,
                     "judge_prompt_version": options.judge_prompt_version,
+                    "verifier_version": options.verifier_version,
                 },
                 key_fingerprint=key_fingerprint,
             )

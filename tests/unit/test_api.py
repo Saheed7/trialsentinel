@@ -124,7 +124,7 @@ def fake_runner(case: Any, options: AuditOptions) -> dict[str, Any]:
         "audit_rows": [{"round": "0", "claim": "x", "deterministic": "pass", "judge": "n/a"}],
         "revisions": 1,
         "seconds": 1.5,
-        "verifier_version": 3,
+        "verifier_version": options.verifier_version,
         "prompt_version": options.prompt_version,
         "judge": options.judge,
         "trace": {
@@ -233,7 +233,7 @@ def test_audit_for_unassessed_trial_is_404_and_bad_input_is_422() -> None:
         missing = client.post("/v1/audits", json={"nct_id": "NCT00000000"}, headers=AUTH)
         assert missing.status_code == 404
         assert client.post("/v1/audits", json={"nct_id": "x"}, headers=AUTH).status_code == 422
-        bad_prompt = {"nct_id": NCT, "prompt_version": 3}
+        bad_prompt = {"nct_id": NCT, "prompt_version": 4}
         assert client.post("/v1/audits", json=bad_prompt, headers=AUTH).status_code == 422
 
 
@@ -280,7 +280,8 @@ def test_finished_audit_is_persisted_with_options_and_key_fingerprint() -> None:
     saved = store.audits[audit_id]
     assert saved.status == "succeeded"
     assert saved.revision == 2
-    assert saved.options["prompt_version"] == 2
+    assert saved.options["prompt_version"] == 3
+    assert saved.options["verifier_version"] == 4
     assert saved.key_fingerprint == hash_key(KEY)[:8]
 
 
@@ -427,7 +428,7 @@ def test_runner_trace_reports_this_audits_usage_only(monkeypatch: pytest.MonkeyP
     # Evidence building is tested elsewhere; this test is only about the usage deltas.
     from trialsentinel.agents import service
 
-    monkeypatch.setattr(service, "build_evidence", lambda case, hits: [])
+    monkeypatch.setattr(service, "build_evidence", lambda case, hits, **kwargs: [])
     monkeypatch.setattr(service, "format_evidence", lambda evidence: "")
     settings = SimpleNamespace(llm_context_tokens=8192)
     runner = AgentRunner(settings)  # type: ignore[arg-type]

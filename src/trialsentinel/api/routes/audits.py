@@ -68,6 +68,7 @@ async def create_audit(
         prompt_version=body.prompt_version,
         judge=body.judge,
         judge_prompt_version=body.judge_prompt_version,
+        verifier_version=body.verifier_version,
     )
     try:
         job = request.app.state.jobs.submit(case, options, as_of=body.as_of, key_fingerprint=key)
