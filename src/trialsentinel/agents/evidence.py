@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from trialsentinel.agents.sanitise import sanitise_excerpt
 from trialsentinel.db.models import FdaaaAssessment, Publication, Trial, TrialPublicationLink
 from trialsentinel.retrieval.search import Hit
 
@@ -132,7 +133,11 @@ async def load_case(session: AsyncSession, nct_id: str, *, as_of: date) -> Case 
     )
 
 
-def build_evidence(case: Case, excerpts: Sequence[Hit]) -> list[Evidence]:
+def build_evidence(
+    case: Case, excerpts: Sequence[Hit], *, sanitise_excerpts: bool = False
+) -> list[Evidence]:
+    """Rule, registry and publication items come from structured fields (trusted); excerpts
+    are free text (untrusted). Verifier v4 sanitises excerpts; v3 keeps them as retrieved."""
     items: list[Evidence] = []
 
     def add(kind: str, text: str) -> None:
@@ -166,8 +171,8 @@ def build_evidence(case: Case, excerpts: Sequence[Hit]) -> list[Evidence]:
     if not case.publications:
         add("publication", f"No PubMed publication is linked to {case.nct_id} by any route.")
     for hit in excerpts:
-        add(
-            "excerpt",
-            f"Excerpt from {hit.doc_type} {hit.source_id}: {hit.text[:MAX_EXCERPT_CHARS]}",
-        )
+        text = hit.text[:MAX_EXCERPT_CHARS]
+        if sanitise_excerpts:
+            text = sanitise_excerpt(text)
+        add("excerpt", f"Excerpt from {hit.doc_type} {hit.source_id}: {text}")
     return items

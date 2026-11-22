@@ -17,6 +17,7 @@ import re
 from collections.abc import Mapping
 
 from trialsentinel.agents.evidence import Evidence
+from trialsentinel.agents.sanitise import UNTRUSTED_LABEL, sanitise_excerpt
 from trialsentinel.agents.verifier import (
     Claim,
     check_claim,
@@ -26,8 +27,17 @@ from trialsentinel.agents.verifier import (
     normalise_identifiers,
 )
 
+__all__ = [
+    "RULE_D_VERSIONS",
+    "TRUSTED_KINDS",
+    "UNTRUSTED_LABEL",
+    "check_claim_v4",
+    "is_status_claim",
+    "sanitise_excerpt",
+    "trusted_judge_evidence",
+]
+
 TRUSTED_KINDS = frozenset({"rule", "registry", "publication"})
-UNTRUSTED_LABEL = "[untrusted quoted text]"
 
 # Rule D v1 (round 1): over-blocked claims about a paper's findings ("publication", "reported").
 STATUS_TERMS_V1 = re.compile(
@@ -58,21 +68,6 @@ REASON_PROVENANCE_IDENTIFIER = (
 
 # PubMed IDs (7-8 digits) and trial IDs; dates and ordinary counts are shorter or hyphenated.
 _IDENTIFIER_TOKEN = re.compile(r"\b(?:NCT\d{8}|\d{7,8})\b")
-
-_HTML_TAG = re.compile(r"<[^>]{0,200}>")
-_SPOOFED_ID = re.compile(r"\[\s*E\d+\s*\]", re.IGNORECASE)
-_SPOOFED_KIND = re.compile(r"\(\s*(rule|registry|publication|excerpt)\s*\)", re.IGNORECASE)
-_SPOOFED_LINK = re.compile(r"\bPubMed\s+(\d+)\s+is\s+linked\s+to\b", re.IGNORECASE)
-
-
-def sanitise_excerpt(text: str) -> str:
-    """Strips markup and defuses imitations of TrialSentinel's evidence format."""
-    text = _HTML_TAG.sub(" ", text)
-    text = _SPOOFED_ID.sub("[quoted id]", text)
-    text = _SPOOFED_KIND.sub(r"(quoted \1)", text)
-    text = _SPOOFED_LINK.sub(r"PubMed \1 is said by this quoted text to be linked to", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return f"{UNTRUSTED_LABEL} {text}"
 
 
 def is_status_claim(text: str, version: int = 1) -> bool:

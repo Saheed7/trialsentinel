@@ -6,6 +6,7 @@ synchronous and DB-free: it needs only the retriever and the language models."""
 import time
 from dataclasses import dataclass, replace
 from datetime import date
+from functools import partial
 from threading import Lock
 from typing import Any
 
@@ -17,18 +18,23 @@ from trialsentinel.agents.missing_results import (
     make_llm_drafter,
     make_llm_judge,
 )
-from trialsentinel.agents.verifier import VERIFIER_VERSION
+from trialsentinel.agents.provenance import check_claim_v4, trusted_judge_evidence
 from trialsentinel.core.config import Settings
 from trialsentinel.llm.usage import UsageCallback
 
 DEFAULT_AS_OF = date(2026, 10, 5)  # fixed for reproducible runs
+DEFAULT_VERIFIER_VERSION = 4  # v3 + rule D v2, sanitised excerpts (red-team round 2)
 
 
 @dataclass(frozen=True)
 class AuditOptions:
-    prompt_version: int = 2
+    """v4 (default): prompt v3, sanitised excerpts, rule D v2, trusted-only judge evidence.
+    v3 reproduces the pre-registered evaluation configuration (use prompt_version=2)."""
+
+    prompt_version: int = 3
     judge: bool = False
     judge_prompt_version: int = 2
+    verifier_version: int = DEFAULT_VERIFIER_VERSION
 
 
 def chat_model(settings: Settings, name: str | None) -> Any:
@@ -45,6 +51,8 @@ def decision_category(reason: str) -> str:
         return "rule_b"
     if reason.startswith("rule C"):
         return "rule_c"
+    if reason.startswith("rule D"):
+        return "rule_d"
     if reason.startswith("cites "):
         return "structure"
     if "does not appear in the cited evidence" in reason:
@@ -65,12 +73,19 @@ def summarize_decisions(audit_rows: list[dict[str, Any]]) -> dict[str, dict[str,
     return {"deterministic": deterministic, "judge": judge}
 
 
-def run_case(case: Case, retriever: Any, graph: Any, context_tokens: int) -> dict[str, Any]:
+def run_case(
+    case: Case,
+    retriever: Any,
+    graph: Any,
+    context_tokens: int,
+    *,
+    sanitise_excerpts: bool = False,
+) -> dict[str, Any]:
     """Runs the agent graph on one loaded case: claims, rejections and the audit trail."""
     retrieval_started = time.perf_counter()
     hits = retriever.search(case.brief_title, limit=3, mode="hybrid", nct_id=case.nct_id)
     retrieval_ms = round((time.perf_counter() - retrieval_started) * 1000, 1)
-    evidence = build_evidence(case, hits)
+    evidence = build_evidence(case, hits, sanitise_excerpts=sanitise_excerpts)
     by_id = {e.id: e.text for e in evidence}
     estimated_tokens = len(format_evidence(evidence)) // 4 + 400  # rough: 4 chars/token + prompt
     started = time.perf_counter()
@@ -162,14 +177,28 @@ class AgentRunner:
                 if options.judge
                 else None
             )
-            self._graphs[options] = build_graph(drafter, judge)
+            if options.verifier_version >= 4:
+                self._graphs[options] = build_graph(
+                    drafter,
+                    judge,
+                    checker=partial(check_claim_v4, rule_d_version=2),
+                    judge_evidence=partial(trusted_judge_evidence, rule_d_version=2),
+                )
+            else:
+                self._graphs[options] = build_graph(drafter, judge)
         return self._graphs[options]
 
     def run(self, case: Case, options: AuditOptions) -> dict[str, Any]:
         with self._lock:  # one audit at a time: one local GPU, one loaded model
             retriever, graph = self._get_retriever(), self._get_graph(options)
             before = replace(self._usage.totals, latencies=[])
-            result = run_case(case, retriever, graph, self._settings.llm_context_tokens)
+            result = run_case(
+                case,
+                retriever,
+                graph,
+                self._settings.llm_context_tokens,
+                sanitise_excerpts=options.verifier_version >= 4,
+            )
             after = self._usage.totals
             trace = {
                 "retrieval_ms": result["retrieval_ms"],
@@ -183,7 +212,7 @@ class AgentRunner:
                 "decisions": summarize_decisions(result["audit_rows"]),
             }
         return result | {
-            "verifier_version": VERIFIER_VERSION,
+            "verifier_version": options.verifier_version,
             "prompt_version": options.prompt_version,
             "judge": options.judge,
             "trace": trace,

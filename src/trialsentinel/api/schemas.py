@@ -43,9 +43,13 @@ class Assessment(BaseModel):
 class AuditRequest(BaseModel):
     nct_id: NctId
     as_of: date = DEFAULT_AS_OF
-    prompt_version: Literal[1, 2] = 2
+    prompt_version: Literal[1, 2, 3] = 3
     judge: bool = Field(default=False, description="Also run the LLM judge inside the loop")
     judge_prompt_version: Literal[1, 2] = 2
+    verifier_version: Literal[3, 4] = Field(
+        default=4,
+        description="4: hardened against prompt injection (default); 3: the evaluated baseline",
+    )
 
 
 class VerifiedClaim(BaseModel):
